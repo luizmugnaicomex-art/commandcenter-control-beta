@@ -1,0 +1,40 @@
+{
+  "collections": [
+    {
+      "name": "users",
+      "documentId": "uid",
+      "description": "User profiles including Carriers and Coordinators",
+      "fields": [
+        { "name": "role", "type": "string", "description": "'Coordinator' or 'Carrier'" },
+        { "name": "email", "type": "string" },
+        { "name": "cnpj", "type": "string", "description": "For carriers" },
+        { "name": "razaoSocial", "type": "string", "description": "For carriers" },
+        { "name": "nomeFantasia", "type": "string", "description": "For carriers" },
+        { "name": "phone", "type": "string", "description": "For carriers" },
+        { "name": "status", "type": "string", "description": "'pending', 'approved', 'rejected' for carriers" }
+      ]
+    },
+    {
+      "name": "appointments",
+      "documentId": "auto-generated",
+      "description": "Truck appointments booked by carriers",
+      "fields": [
+        { "name": "carrier", "type": "string" },
+        { "name": "carrierUid", "type": "string" },
+        { "name": "driverName", "type": "string" },
+        { "name": "licensePlate", "type": "string" },
+        { "name": "containerNumber", "type": "string" },
+        { "name": "scheduledTime", "type": "string", "description": "HH:MM format" },
+        { "name": "date", "type": "string", "description": "YYYY-MM-DD format" },
+        { "name": "slotId", "type": "string" },
+        { "name": "status", "type": "string", "description": "Awaiting Call, Called/In Transit, In Yard, Operated, Completed, No Show" },
+        { "name": "isBitrem", "type": "boolean" },
+        { "name": "isSpecialWindow", "type": "boolean" },
+        { "name": "gateInTime", "type": "string", "description": "HH:MM format" },
+        { "name": "gateOutTime", "type": "string", "description": "HH:MM format" },
+        { "name": "noShowCount", "type": "number" },
+        { "name": "createdAt", "type": "timestamp" }
+      ]
+    }
+  ]
+}

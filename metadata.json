@@ -1,0 +1,6 @@
+{
+  "name": "Yard Command Center",
+  "description": "Container Yard Access & Appointment System for soft launch phase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
