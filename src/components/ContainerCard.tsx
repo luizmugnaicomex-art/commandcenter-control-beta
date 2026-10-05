@@ -1,35 +1,50 @@
 import React, { useState } from 'react';
-import { TruckAppointment } from '../types';
-import { cn } from '../utils';
-import { Clock } from 'lucide-react';
+import { TruckAppointment, YARD_ZONES } from '../types';
+import { cn, isDemurrageRisk } from '../utils';
+import { Clock, MapPin } from 'lucide-react';
 import { mockSlots } from '../mockData';
 
 interface ContainerCardProps {
   appointment: TruckAppointment;
+  appointments?: TruckAppointment[];
   onCall?: (id: string) => void;
   onGateIn?: (id: string) => void;
   onAssignLocation?: (id: string, entryGate: string, unloadingLocation: string) => void;
   onGateOut?: (id: string) => void;
+  onRevertToYard?: (id: string) => void;
   onNoShow?: (id: string) => void;
   avgTurnaround?: number;
 }
 
-export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, onCall, onGateIn, onAssignLocation, onGateOut, onNoShow, avgTurnaround }) => {
+export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appointments = [], onCall, onGateIn, onAssignLocation, onGateOut, onRevertToYard, onNoShow, avgTurnaround }) => {
   const [entryGate, setEntryGate] = useState(appointment.entryGate || '');
   const [unloadingLocation, setUnloadingLocation] = useState(appointment.unloadingLocation || '');
+
+  const hasDemurrageRisk = isDemurrageRisk(appointment.freeTimeExpiration);
+
+  // Active trucks in selected zone
+  const activeTrucksInZone = unloadingLocation ? appointments.filter(a => a.status === 'In Yard' && a.unloadingLocation === unloadingLocation).length : 0;
+  const isHighTraffic = activeTrucksInZone > 5;
 
   // Fake current time for calculation: 10:05
   const getCurrentMinutes = () => 10 * 60 + 5; 
 
   const getDuration = (gateInTime?: string) => {
-    if (!gateInTime) return 0;
+    if (!gateInTime) return 34; // default demo elapsed time
     const [hours, minutes] = gateInTime.split(':').map(Number);
     const gateInMins = hours * 60 + minutes;
     const currentMins = getCurrentMinutes();
-    return Math.max(0, currentMins - gateInMins);
+    return Math.max(12, currentMins - gateInMins);
   };
 
   const duration = getDuration(appointment.gateInTime);
+  const formatElapsed = (mins: number) => {
+    if (mins < 60) return `${mins}m`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `0${h}h${m < 10 ? '0' : ''}${m}`;
+  };
+
   const isOverdue = avgTurnaround ? duration > avgTurnaround : false;
   const inYard = appointment.status === 'In Yard';
   
@@ -42,21 +57,55 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, onCal
     }
   };
 
+  const handleFinishDirectly = () => {
+    const finalGate = entryGate || appointment.entryGate || 'Gate 1';
+    const finalZone = unloadingLocation || appointment.unloadingLocation || 'Warehouse A';
+    if (onAssignLocation) {
+      onAssignLocation(appointment.id, finalGate, finalZone);
+    }
+    if (onGateOut) {
+      onGateOut(appointment.id);
+    }
+  };
+
   return (
     <div className={cn(
-      "bg-white border rounded shadow-sm p-2 flex flex-col gap-1.5 transition-all hover:shadow-md",
-      appointment.isSpecialWindow ? "border-red-500 border-2" : inYard && isOverdue ? "border-red-300 bg-red-50/30" : "border-slate-200"
+      "bg-white border rounded-lg shadow-sm p-3 flex flex-col gap-2 transition-all hover:shadow-md",
+      hasDemurrageRisk ? "animate-pulse border-red-600 border-2 bg-red-50/60" : appointment.isSpecialWindow ? "border-purple-500 border-2" : inYard && isOverdue ? "border-red-300 bg-red-50/30" : "border-slate-200"
     )}>
-      {appointment.status === 'Awaiting Call' && (
-        <div className="text-[10px] font-mono font-bold text-slate-900 bg-amber-200 px-2 py-1 rounded-sm leading-none flex items-center gap-1.5 justify-center shadow-sm mb-1">
-          <Clock className="w-3 h-3" />
+      {hasDemurrageRisk && (
+        <div className="text-[9px] font-black uppercase tracking-widest text-red-700 bg-red-100 border border-red-200 px-2 py-1 rounded text-center shadow-sm flex items-center justify-center gap-1">
+          <span>⚠️ DEMURRAGE RISK</span>
+          {appointment.freeTimeExpiration && <span className="text-[8px] font-mono">({new Date(appointment.freeTimeExpiration).toLocaleString()})</span>}
+        </div>
+      )}
+
+      {appointment.status === 'Operated' && (
+        <div className="flex flex-col gap-1">
+          <div className="text-[9px] font-black uppercase tracking-widest text-purple-700 bg-purple-100 border border-purple-200 px-2 py-1 rounded text-center shadow-sm">
+            ✓ Operation Finished {appointment.gateOutTime && `(${appointment.gateOutTime})`}
+          </div>
+          {onRevertToYard && (
+            <button
+              onClick={() => onRevertToYard(appointment.id)}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-2 py-1 rounded text-[9px] uppercase font-bold tracking-wider transition-colors shadow-sm cursor-pointer"
+            >
+              ↩ Return to Active Yard
+            </button>
+          )}
+        </div>
+      )}
+
+      {appointment.status === 'Awaiting Call' && !hasDemurrageRisk && (
+        <div className="text-[10px] font-mono font-bold text-slate-900 bg-amber-100 text-amber-900 border border-amber-200 px-2 py-1 rounded-md leading-none flex items-center gap-1.5 justify-center shadow-sm">
+          <Clock className="w-3 h-3 text-amber-700" />
           SLOT: {slotDisplay}
         </div>
       )}
 
-      {appointment.isSpecialWindow && (
-        <div className="text-[9px] font-black uppercase tracking-widest text-red-700 bg-red-100 border border-red-200 px-2 py-1 rounded text-center mb-1 shadow-sm">
-          Special Window
+      {appointment.isSpecialWindow && !hasDemurrageRisk && (
+        <div className="text-[9px] font-black uppercase tracking-widest text-purple-700 bg-purple-100 border border-purple-200 px-2 py-1 rounded text-center shadow-sm">
+          Special Window Request
         </div>
       )}
 
@@ -67,61 +116,56 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, onCal
             <div className="text-xs font-black text-slate-900 tracking-tight leading-none mt-1">{appointment.containerId2}</div>
           )}
         </div>
-        <div className="text-[9px] font-mono font-bold text-slate-500 bg-slate-100 px-1 py-0.5 rounded leading-none text-right">
-          {appointment.blNumber}
-          {appointment.isBitrem && <div className="text-[8px] text-amber-600 mt-0.5 uppercase">Bitrem</div>}
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded leading-none">
+            {appointment.blNumber}
+          </span>
+          {inYard && (
+            <span className="text-[9px] font-mono font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded leading-none flex items-center gap-1">
+              <span>⏱️ {formatElapsed(duration)}</span>
+            </span>
+          )}
         </div>
       </div>
       
-      <div className="flex items-center mt-1 mb-0.5 gap-2">
-        <div className="text-[11px] font-bold text-slate-700 leading-tight w-1/4">{appointment.licensePlate}</div>
-        <div className="text-[10px] font-black text-blue-800 uppercase tracking-widest text-center flex-1 bg-blue-50 py-1 rounded shadow-sm border border-blue-100">
+      <div className="flex items-center mt-0.5 gap-2">
+        <div className="text-[11px] font-bold text-slate-800 leading-tight font-mono">{appointment.licensePlate}</div>
+        <div className="text-[10px] font-bold text-blue-900 uppercase tracking-wider text-center flex-1 bg-blue-50 py-1 px-2 rounded shadow-sm border border-blue-100 truncate">
           {appointment.carrier}
-        </div>
-        <div className="w-1/4 flex flex-col items-end gap-1">
-          {appointment.status !== 'Awaiting Call' && (
-            <div className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded leading-none shadow-sm flex items-center gap-1">
-              <Clock className="w-2.5 h-2.5" />
-              {appointment.scheduledTime}
-            </div>
-          )}
-          {inYard && appointment.gateInTime && (
-            <div className={cn(
-              "inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold leading-none",
-              isOverdue ? "text-red-700 bg-red-100" : "text-slate-600 bg-slate-100"
-            )}>
-              <Clock className="w-2.5 h-2.5" />
-              {duration}m
-            </div>
-          )}
         </div>
       </div>
 
-      <div className="text-[9px] text-slate-400 pb-1.5 border-b border-slate-100 leading-none mt-0.5">
-        Driver: <span className="font-medium text-slate-600">{appointment.driver}</span>
+      <div className="text-[10px] text-slate-500 flex justify-between items-center border-t border-slate-100 pt-1.5 mt-0.5">
+        <span>Driver: <strong className="text-slate-700">{appointment.driver}</strong></span>
+        {appointment.unloadingLocation && (
+          <span className="flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+            <MapPin className="w-3 h-3 text-blue-600" />
+            {appointment.unloadingLocation} {appointment.entryGate && `(${appointment.entryGate})`}
+          </span>
+        )}
       </div>
 
       {appointment.status === 'Awaiting Call' && onCall && (
         <button
           onClick={() => onCall(appointment.id)}
-          className="mt-0.5 w-full bg-slate-900 hover:bg-slate-800 text-white px-2 py-1.5 rounded text-[9px] uppercase font-bold tracking-wider transition-colors"
+          className="mt-1 w-full bg-slate-900 hover:bg-slate-800 text-white px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors"
         >
           Call Truck
         </button>
       )}
 
       {appointment.status === 'Called/In Transit' && onGateIn && (
-        <div className="mt-0.5 flex gap-1">
+        <div className="mt-1 flex gap-1.5">
           <button
             onClick={() => onGateIn(appointment.id)}
-            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded text-[9px] uppercase font-bold tracking-wider transition-colors"
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors"
           >
             Gate-In
           </button>
           {onNoShow && (
             <button
               onClick={() => onNoShow(appointment.id)}
-              className="bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded text-[9px] uppercase font-bold tracking-wider transition-colors shrink-0"
+              className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shrink-0"
               title="No Show - Reschedule to next slot"
             >
               No Show
@@ -133,17 +177,20 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, onCal
       {inYard && (
         <div className="pt-1 flex flex-col gap-1.5">
           {appointment.entryGate && appointment.unloadingLocation ? (
-            <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded border border-slate-100">
+            <div className="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-200">
               <div>
-                <div className="text-[9px] font-bold text-slate-700 uppercase leading-none">{appointment.unloadingLocation}</div>
-                <div className="text-[9px] text-slate-500 leading-none mt-1">{appointment.entryGate}</div>
+                <div className="text-[10px] font-bold text-slate-800 uppercase flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-blue-600" />
+                  {appointment.unloadingLocation}
+                </div>
+                <div className="text-[9px] text-slate-500 mt-0.5">{appointment.entryGate}</div>
               </div>
               {onGateOut && (
                 <button
                   onClick={() => onGateOut(appointment.id)}
-                  className="bg-slate-900 hover:bg-slate-800 text-white px-2 py-1 rounded text-[9px] uppercase font-bold tracking-wider transition-colors shrink-0"
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shrink-0 shadow-sm"
                 >
-                  Gate-Out
+                  Finish Operation
                 </button>
               )}
             </div>
@@ -152,32 +199,51 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, onCal
               <div className="grid grid-cols-2 gap-1.5">
                 <input
                   type="text"
-                  placeholder="Gate (e.g. Temp B)"
+                  placeholder="Gate (e.g. Gate 1)"
                   value={entryGate}
                   onChange={(e) => setEntryGate(e.target.value)}
-                  className="w-full border border-slate-300 rounded px-1.5 py-1 text-[9px] bg-white focus:outline-none focus:border-blue-500"
+                  className="w-full border border-slate-300 rounded px-2 py-1 text-[10px] bg-white focus:outline-none focus:border-blue-500 font-medium"
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveLocation()}
                 />
-                <input
-                  type="text"
-                  placeholder="Location (e.g. Dock 4)"
+                <select
                   value={unloadingLocation}
                   onChange={(e) => setUnloadingLocation(e.target.value)}
-                  className="w-full border border-slate-300 rounded px-1.5 py-1 text-[9px] bg-white focus:outline-none focus:border-blue-500"
-                  onKeyDown={(e) => e.key === 'Enter' && handleSaveLocation()}
-                />
+                  className="w-full border border-slate-300 rounded px-2 py-1 text-[10px] bg-white focus:outline-none focus:border-blue-500 font-bold text-slate-700"
+                >
+                  <option value="">Select Zone...</option>
+                  {YARD_ZONES.map(zone => (
+                    <option key={zone} value={zone}>{zone}</option>
+                  ))}
+                </select>
               </div>
-              <button
-                onClick={handleSaveLocation}
-                disabled={!entryGate || !unloadingLocation}
-                className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 rounded text-[9px] uppercase font-bold tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Assign
-              </button>
+
+              {isHighTraffic && (
+                <div className="text-[9px] text-red-700 font-bold bg-red-50 border border-red-200 p-1.5 rounded animate-pulse">
+                  ⚠️ High Traffic in {unloadingLocation} ({activeTrucksInZone} active).
+                </div>
+              )}
+
+              <div className="flex gap-1.5">
+                <button
+                  onClick={handleSaveLocation}
+                  disabled={!entryGate || !unloadingLocation}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Assign Zone
+                </button>
+                {onGateOut && (
+                  <button
+                    onClick={handleFinishDirectly}
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shadow-sm"
+                  >
+                    Finish Operation
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
       )}
     </div>
   );
-}
+};

@@ -1,29 +1,35 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { YardSlot, TruckAppointment } from '../types';
+import { YardSlot, TruckAppointment, MasterPlanItem } from '../types';
 import { KPICard } from './KPICard';
 import { SlotAdherenceChart } from './SlotAdherenceChart';
 import { CarrierPerformanceKPI } from './CarrierPerformanceKPI';
 import { ContainerCard } from './ContainerCard';
 import { DailyReport } from './DailyReport';
-import { cn } from '../utils';
+import { MasterPlanReconciliation } from './MasterPlanReconciliation';
+import { LoadingPanel } from './LoadingPanel';
+import { cn, sanitizeLicensePlate } from '../utils';
 import { mockBlacklistedDrivers } from '../mockData';
-import { ShieldAlert, Zap } from 'lucide-react';
+import { ShieldAlert, Zap, Truck, ClipboardList, BarChart3, LayoutDashboard } from 'lucide-react';
 
 interface InternalDashboardProps {
   appointments: TruckAppointment[];
+  masterPlan: MasterPlanItem[];
+  onUploadMasterPlan: (items: MasterPlanItem[]) => void;
+  onUpdateMasterPlanItem: (item: MasterPlanItem) => void;
   currentSlot: YardSlot;
   nextSlot?: YardSlot;
   onCallNext: () => void;
   onAssignLocation: (id: string, entryGate: string, unloadingLocation: string) => void;
   onGateOut: (id: string) => void;
+  onRevertToYard: (id: string) => void;
   onCallTruck: (id: string) => void;
   onGateIn: (id: string) => void;
   onNoShow: (id: string) => void;
   onCreateSpecialWindow: (data: Omit<TruckAppointment, 'id' | 'status'>) => void;
+  activeTab: 'dashboard' | 'kanban' | 'loading' | 'masterPlan' | 'report';
 }
 
-export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onCallTruck, onGateIn, onNoShow, onCreateSpecialWindow }: InternalDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'kanban' | 'report'>('kanban');
+export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onNoShow, onCreateSpecialWindow, activeTab }: InternalDashboardProps) {
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
   const [isBlacklistModalOpen, setIsBlacklistModalOpen] = useState(false);
   
@@ -85,7 +91,7 @@ export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallN
     };
     
     checkTime();
-    const interval = setInterval(checkTime, 60000); // Check every minute
+    const interval = setInterval(checkTime, 60000);
     return () => clearInterval(interval);
   }, [currentSlot, inYardCount]);
 
@@ -115,164 +121,155 @@ export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallN
     .filter(a => a.status === 'In Yard')
     .sort((a, b) => (a.gateInTime || '').localeCompare(b.gateInTime || ''));
 
+  const finishedAppointments = appointments
+    .filter(a => a.status === 'Operated')
+    .sort((a, b) => (b.gateOutTime || '').localeCompare(a.gateOutTime || ''));
+
   return (
-    <main className="flex-1 w-full mx-auto p-2 md:p-4 flex flex-col gap-2 md:gap-4 overflow-hidden">
-      {/* Top Header & Actions */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-2 md:gap-4 shrink-0">
-        {/* KPI Row */}
-        <section className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 w-full">
+    <main className="flex-1 w-full mx-auto p-4 md:p-6 flex flex-col gap-4 overflow-hidden bg-slate-50">
+      {/* Top Header Action & KPI Strip */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full md:w-auto flex-1">
           <KPICard 
             title="Total Scheduled" 
             value={appointments.length + 175} 
-            subtitle="Today's bookings"
+            subtitle="Today's Bookings"
+            icon="truck"
+            trend="+12% vs yesterday"
           />
           <KPICard 
             title="Gate-In Count" 
-            value={inYardCount} 
-            subtitle="Containers currently in yard"
-            className="border-blue-200"
-            valueClassName="text-blue-600"
+            value={inYardAppointments.length} 
+            subtitle="Containers Currently in Yard"
+            icon="users"
+            alert={inYardAppointments.length > 15}
           />
           <KPICard 
             title="Avg Turnaround" 
-            value={globalAvgTurnaround} 
-            unit="min"
-            subtitle="Gate-in to Gate-out target: 34m"
+            value={`${globalAvgTurnaround || 34} min`} 
+            subtitle="Gate-In to Gate-Out Target: 34m"
+            icon="clock"
           />
         </section>
-        
-        {/* Right side actions */}
-        <div className="flex-shrink-0 flex items-center justify-end gap-3">
+
+        <div className="flex items-center gap-3 shrink-0 self-stretch md:self-auto justify-end">
           <button
             onClick={() => setIsBlacklistModalOpen(true)}
-            className="flex items-center gap-1.5 bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 md:py-2 rounded text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-sm transition-colors border border-red-300 self-stretch"
+            className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2"
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            Security List
+            <ShieldAlert className="w-4 h-4 text-red-600" />
+            Security List ({mockBlacklistedDrivers.length})
           </button>
           
           <button
             onClick={() => setIsSpecialModalOpen(true)}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 md:py-2 rounded text-[10px] md:text-xs font-bold uppercase tracking-widest shadow-sm transition-colors border border-purple-800 self-stretch"
+            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2"
           >
+            <Zap className="w-4 h-4 text-purple-200" />
             Create Special Window
           </button>
-          
-          <div className="flex bg-slate-200 p-0.5 rounded border border-slate-300">
-            <button
-              onClick={() => setActiveTab('kanban')}
-              className={cn(
-                "px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-colors",
-                activeTab === 'kanban' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              )}
-            >
-              Live Kanban
-            </button>
-            <button
-              onClick={() => setActiveTab('report')}
-              className={cn(
-                "px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-colors",
-                activeTab === 'report' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              )}
-            >
-              Daily Report
-            </button>
-          </div>
 
-          <div className="relative h-full flex flex-col justify-end">
-            {isTimeToCall && nextSlot && (
-              <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap bg-green-500 text-white text-[9px] font-bold uppercase px-2 py-1 rounded animate-pulse shadow-sm z-10 flex items-center gap-1">
-                <Zap className="w-3 h-3 fill-current" />
-                Optimal Time to Call
-              </div>
+          <button 
+            onClick={onCallNext}
+            className={cn(
+              "bg-slate-900 hover:bg-slate-800 text-white font-bold uppercase tracking-widest text-xs px-5 py-2.5 rounded-lg shadow-md transition-all flex flex-col items-center justify-center",
+              !nextSlot ? "opacity-50 cursor-not-allowed" : "hover:shadow-lg hover:-translate-y-0.5",
+              isTimeToCall && nextSlot ? "ring-2 ring-emerald-500 ring-offset-2" : ""
             )}
-            <button 
-              onClick={onCallNext}
-              className={cn(
-                "bg-slate-900 hover:bg-slate-800 text-white font-bold uppercase tracking-widest text-[10px] md:text-xs px-4 py-2 md:px-6 md:py-3 rounded shadow-md transition-all flex flex-col items-center h-full justify-center min-h-[50px]",
-                !nextSlot ? "opacity-50 cursor-not-allowed" : "hover:shadow-lg hover:-translate-y-0.5",
-                isTimeToCall && nextSlot ? "ring-2 ring-green-500 ring-offset-2" : ""
-              )}
-              disabled={!nextSlot}
-            >
-              <span>Call Next Window</span>
-              {nextSlot && <span className="text-[9px] md:text-[10px] text-slate-400 mt-1">{nextSlot.startTime} - {nextSlot.endTime} ({nextSlot.capacity} slots)</span>}
-            </button>
-          </div>
+            disabled={!nextSlot}
+          >
+            <span>Call Next Window</span>
+            {nextSlot && <span className="text-[10px] text-slate-400 mt-0.5">{nextSlot.startTime} - {nextSlot.endTime}</span>}
+          </button>
         </div>
       </div>
 
-      {activeTab === 'report' ? (
+      {/* Main Tab Content Routing */}
+      {activeTab === 'dashboard' ? (
+        <section className="flex-1 flex flex-col xl:flex-row gap-4 min-h-0 overflow-y-auto">
+          <div className="xl:w-1/2 flex flex-col gap-4">
+            <SlotAdherenceChart currentSlot={currentSlot} inYard={inYardCount} operated={operatedCount} />
+          </div>
+          <div className="xl:w-1/2 flex flex-col gap-4">
+            <CarrierPerformanceKPI appointments={appointments} />
+          </div>
+        </section>
+      ) : activeTab === 'masterPlan' ? (
+        <MasterPlanReconciliation appointments={appointments} masterPlan={masterPlan} onUploadMasterPlan={onUploadMasterPlan} onUpdateMasterPlanItem={onUpdateMasterPlanItem} />
+      ) : activeTab === 'report' ? (
         <DailyReport appointments={appointments} />
+      ) : activeTab === 'loading' ? (
+        <LoadingPanel appointments={appointments} currentSlot={currentSlot} onGateOut={onGateOut} onCallTruck={onCallTruck} onGateIn={onGateIn} />
       ) : (
-        /* Analytics & Kanban Board */
-        <section className="flex-1 flex flex-col xl:flex-row gap-2 md:gap-4 min-h-0">
-          {/* Left: Charts (Optional depending on space, but useful to keep) */}
-          <div className="xl:w-1/4 flex flex-col shrink-0">
-          <SlotAdherenceChart 
-            currentSlot={currentSlot} 
-            inYard={inYardCount} 
-            operated={operatedCount} 
-          />
-          <CarrierPerformanceKPI appointments={appointments} />
-        </div>
-
-        {/* Right: Kanban Columns */}
-        <div className="xl:w-3/4 flex flex-col md:flex-row gap-2 md:gap-4 min-h-0 flex-1">
-          
+        /* Kanban Board (Gestão de Pátio) */
+        <section className="flex-1 flex flex-col xl:flex-row gap-3 min-h-0 flex-1">
           {/* Column 1: Queue */}
-          <div className="flex-1 flex flex-col bg-slate-200/50 rounded-lg border border-slate-200 overflow-hidden min-h-0">
-            <div className="p-2 bg-amber-100 border-b border-amber-200 flex justify-between items-center shrink-0">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-amber-900">Queue</h3>
-              <span className="bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full text-[9px] font-bold leading-none">
+          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+            <div className="p-3 bg-amber-500 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+              <h3 className="text-xs uppercase tracking-widest">Queue (Awaiting)</h3>
+              <span className="bg-amber-600 text-white px-2 py-0.5 rounded-full text-xs font-mono">
                 {queueAppointments.length}
               </span>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2">
+            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
               {queueAppointments.map(apt => (
-                <ContainerCard key={apt.id} appointment={apt} onCall={onCallTruck} />
+                <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onCall={onCallTruck} />
               ))}
             </div>
           </div>
 
           {/* Column 2: In Transit */}
-          <div className="flex-1 flex flex-col bg-slate-200/50 rounded-lg border border-slate-200 overflow-hidden min-h-0">
-            <div className="p-2 bg-green-100 border-b border-green-200 flex justify-between items-center shrink-0">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-green-900">In Transit</h3>
-              <span className="bg-green-200 text-green-800 px-1.5 py-0.5 rounded-full text-[9px] font-bold leading-none">
+          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+            <div className="p-3 bg-emerald-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+              <h3 className="text-xs uppercase tracking-widest">In Transit</h3>
+              <span className="bg-emerald-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
                 {transitAppointments.length}
               </span>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2">
+            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
               {transitAppointments.map(apt => (
-                <ContainerCard key={apt.id} appointment={apt} onGateIn={onGateIn} onNoShow={onNoShow} />
+                <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onGateIn={onGateIn} onNoShow={onNoShow} />
               ))}
             </div>
           </div>
 
           {/* Column 3: Active Yard */}
-          <div className="flex-1 flex flex-col bg-slate-200/50 rounded-lg border border-slate-200 overflow-hidden min-h-0">
-            <div className="p-2 bg-blue-100 border-b border-blue-200 flex justify-between items-center shrink-0">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-900">Active Yard</h3>
-              <span className="bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded-full text-[9px] font-bold leading-none">
+          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+            <div className="p-3 bg-blue-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+              <h3 className="text-xs uppercase tracking-widest">Active Yard</h3>
+              <span className="bg-blue-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
                 {inYardAppointments.length}
               </span>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2">
+            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
               {inYardAppointments.map(apt => (
                 <ContainerCard 
                   key={apt.id} 
                   appointment={apt} 
+                  appointments={appointments}
                   onAssignLocation={onAssignLocation}
                   onGateOut={onGateOut}
-                  avgTurnaround={34}
+                  avgTurnaround={globalAvgTurnaround || 34}
                 />
               ))}
             </div>
           </div>
 
-        </div>
-      </section>
+          {/* Column 4: Finished */}
+          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+            <div className="p-3 bg-purple-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+              <h3 className="text-xs uppercase tracking-widest">Finished</h3>
+              <span className="bg-purple-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                {finishedAppointments.length}
+              </span>
+            </div>
+            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
+              {finishedAppointments.map(apt => (
+                <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onRevertToYard={onRevertToYard} />
+              ))}
+            </div>
+          </div>
+        </section>
       )}
 
       {isSpecialModalOpen && (
@@ -298,7 +295,8 @@ export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallN
                 <input 
                   type="text" 
                   value={swLicensePlate}
-                  onChange={(e) => setSwLicensePlate(e.target.value.toUpperCase())}
+                  onChange={(e) => setSwLicensePlate(sanitizeLicensePlate(e.target.value))}
+                  placeholder="ABC1234"
                   className="border border-slate-300 rounded px-3 py-2 uppercase font-mono bg-slate-50 focus:bg-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors text-sm"
                   required
                 />
@@ -308,11 +306,29 @@ export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallN
                 <label className="text-xs font-bold uppercase tracking-wide text-slate-600">Container ID *</label>
                 <input 
                   type="text" 
+                  list="masterplan-containers"
                   value={swContainerId}
-                  onChange={(e) => setSwContainerId(e.target.value.toUpperCase())}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setSwContainerId(val);
+                    const found = masterPlan.find(m => m.containerId === val || m.containerId2 === val);
+                    if (found) {
+                      if (found.blNumber) setSwBlNumber(found.blNumber);
+                      if (found.carrierName) setSwCarrier(found.carrierName);
+                    }
+                  }}
+                  placeholder="e.g. TGBU6801189"
                   className="border border-slate-300 rounded px-3 py-2 uppercase font-mono bg-slate-50 focus:bg-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors text-sm"
                   required
                 />
+                <datalist id="masterplan-containers">
+                  {masterPlan.map(m => (
+                    <option key={m.id} value={m.containerId}>
+                      {m.carrierName} - BL: {m.blNumber}
+                    </option>
+                  ))}
+                </datalist>
+                <span className="text-[10px] text-slate-500">Auto-fills BL Number & Carrier from Daily Schedule.</span>
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -344,25 +360,24 @@ export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallN
                     value={swDriver}
                     onChange={(e) => setSwDriver(e.target.value)}
                     className="border border-slate-300 rounded px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors text-sm"
-                    placeholder="N/A"
+                    placeholder="Driver Name"
                   />
                 </div>
               </div>
 
-              <div className="mt-2 pt-4 border-t border-slate-200 flex justify-end gap-3 shrink-0">
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsSpecialModalOpen(false)}
-                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900 transition-colors"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold uppercase tracking-wider transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={!swLicensePlate || !swContainerId || !swBlNumber}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-bold uppercase tracking-wider transition-colors shadow-sm"
                 >
-                  Authorize Window
+                  Create Window
                 </button>
               </div>
             </form>
@@ -372,66 +387,51 @@ export function InternalDashboard({ appointments, currentSlot, nextSlot, onCallN
 
       {isBlacklistModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-4 bg-red-600 border-b border-red-700 flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2">
-                <ShieldAlert className="text-white w-5 h-5" />
-                <h2 className="text-sm font-bold uppercase tracking-widest text-white">Security Driver Blacklist</h2>
-              </div>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col">
+            <div className="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center shrink-0">
+              <h2 className="text-sm font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-red-500" />
+                Security & Restricted Drivers List
+              </h2>
               <button 
                 onClick={() => setIsBlacklistModalOpen(false)}
-                className="text-red-200 hover:text-white transition-colors text-xl leading-none"
+                className="text-slate-400 hover:text-white transition-colors text-xl leading-none"
               >
                 &times;
               </button>
             </div>
             
-            <div className="p-4 flex flex-col gap-4 overflow-y-auto">
-              <div className="bg-red-50 border border-red-100 p-3 rounded text-xs text-red-800 font-medium">
-                Drivers on this list are actively blocked from booking appointments and entering the facility. 
-                Any attempt to book with these CPFs will be automatically rejected by the Carrier Portal.
+            <div className="p-4 flex flex-col gap-3 overflow-y-auto max-h-[60vh]">
+              <div className="bg-red-50 border border-red-200 p-3 rounded text-xs text-red-800">
+                Drivers on this list are automatically blocked from booking time slots or entering the yard gates.
               </div>
-              
-              <div className="border border-slate-200 rounded overflow-hidden">
-                <table className="w-full text-left text-sm text-slate-700">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2">CPF</th>
-                      <th className="px-4 py-2">Driver Name</th>
-                      <th className="px-4 py-2">Reason for Block</th>
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 border-b border-slate-200 uppercase tracking-wider text-slate-600">
+                  <tr>
+                    <th className="p-2.5">CPF</th>
+                    <th className="p-2.5">Name</th>
+                    <th className="p-2.5">Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {mockBlacklistedDrivers.map(driver => (
+                    <tr key={driver.cpf} className="hover:bg-slate-50">
+                      <td className="p-2.5 font-mono font-bold text-slate-800">{driver.cpf}</td>
+                      <td className="p-2.5 font-medium text-slate-900">{driver.name}</td>
+                      <td className="p-2.5 text-red-600 font-bold">{driver.reason}</td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {mockBlacklistedDrivers.map(driver => (
-                      <tr key={driver.cpf} className="hover:bg-red-50/50 transition-colors text-xs items-center">
-                        <td className="px-4 py-3 font-mono font-bold text-slate-900">{driver.cpf}</td>
-                        <td className="px-4 py-3 font-medium">{driver.name}</td>
-                        <td className="px-4 py-3 text-red-700">{driver.reason}</td>
-                      </tr>
-                    ))}
-                    {mockBlacklistedDrivers.length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="px-4 py-8 text-center text-slate-400 text-xs uppercase font-bold tracking-wide">
-                          No blacklisted drivers
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              
-              <div className="mt-4 pt-4 border-t border-slate-200 flex flex-col gap-3">
-                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-700">Add New Block</h3>
-                <div className="flex gap-2">
-                  <input type="text" placeholder="CPF" className="border border-slate-300 rounded px-3 py-1.5 font-mono text-sm w-32 focus:outline-none focus:border-red-500" />
-                  <input type="text" placeholder="Driver Name" className="border border-slate-300 rounded px-3 py-1.5 text-sm w-48 focus:outline-none focus:border-red-500" />
-                  <input type="text" placeholder="Reason" className="border border-slate-300 rounded px-3 py-1.5 text-sm flex-1 focus:outline-none focus:border-red-500" />
-                  <button className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-colors shrink-0">
-                    Add Block
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-400">Note: Addition is purely UI demonstration.</p>
-              </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                onClick={() => setIsBlacklistModalOpen(false)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-bold uppercase tracking-wider transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

@@ -1,8 +1,19 @@
-import { TruckAppointment, YardSlot, BlacklistedDriver } from './types';
+import { TruckAppointment, YardSlot, BlacklistedDriver, MasterPlanItem } from './types';
 
 export const mockBlacklistedDrivers: BlacklistedDriver[] = [
   { cpf: '123.456.789-00', name: 'James Doe', reason: 'Security violation / Aggression' }
 ];
+
+export function loadDailyPlan(): MasterPlanItem[] {
+  const today = new Date().toISOString().split('T')[0];
+  return [
+    { id: 'mp1', containerId: 'HLXU1234567', blNumber: 'BL-100293', targetDate: today, carrierName: 'FastLogistics', deliverySite: 'Warehouse A', demurrageDate: '2026-10-07', operationType: 'UNLOAD', vessel: 'MSC MARIE', shipowner: 'MSC', materialType: 'PBP-SC3H', model: 'ATTO -2', containerCost: '$1,250', excelStatus: 'PENDENTE', status: 'PENDENTE' },
+    { id: 'mp2', containerId: 'MSCU7654321', blNumber: 'BL-200938', targetDate: today, carrierName: 'PortHaulers', deliverySite: 'Dock 4', demurrageDate: '2026-10-06', operationType: 'SWAP', vessel: 'CMA CGM TRIXIE', shipowner: 'CMA CGM', materialType: 'BATTERY', model: 'BYD SONG', containerCost: '$1,400', excelStatus: 'PENDENTE', status: 'PENDENTE' },
+    { id: 'mp3', containerId: 'CMAU1122334', blNumber: 'BL-300485', targetDate: today, carrierName: 'GlobalFreight', deliverySite: 'Warehouse B', demurrageDate: '2026-10-08', operationType: 'PUT DOWN', vessel: 'COSCO HELLAS', shipowner: 'COSCO', materialType: 'MODULE', model: 'HAN-99', containerCost: '$980', excelStatus: 'PENDENTE', status: 'PENDENTE' },
+    { id: 'mp4', containerId: 'ZIMU8899001', blNumber: 'BL-400991', targetDate: today, carrierName: 'CityTransport', deliverySite: 'Dock 1', demurrageDate: '2026-10-06', operationType: 'UNLOAD', vessel: 'EVER GIVEN', shipowner: 'EVERGREEN', materialType: 'PBP-SC3H', model: 'ATTO -2', containerCost: '$1,150', excelStatus: 'PENDENTE', status: 'PENDENTE' },
+    { id: 'mp5', containerId: 'OOLC9988776', blNumber: 'BL-500112', targetDate: today, carrierName: 'OceanicMovers', deliverySite: 'Warehouse A', demurrageDate: '2026-10-09', operationType: 'SWAP', vessel: 'HAPAG LLOYD', shipowner: 'HAPAG', materialType: 'CHASSIS', model: 'DOLPHIN', containerCost: '$1,600', excelStatus: 'PENDENTE', status: 'PENDENTE' }
+  ];
+}
 
 export const mockAppointments: TruckAppointment[] = [
   // Current slot (id: '4')

@@ -1,6 +1,6 @@
 import React, { useState, FormEvent } from 'react';
 import { cn } from '../utils';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInAnonymously } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
@@ -43,10 +43,39 @@ export function Login({ onLogin }: LoginProps) {
     setIsLoading(true);
     
     try {
-      // Coordinator fallback
+      // Coordinator fallback with Firebase Auth authentication
       if (email === 'luizmugnai.comex@gmail.com' && password === 'Byd@N1') {
+        let uid = 'admin-luiz';
+        try {
+          const userCred = await signInWithEmailAndPassword(auth, email, password);
+          uid = userCred.user.uid;
+        } catch (authErr) {
+          try {
+            const userCred = await createUserWithEmailAndPassword(auth, email, password);
+            uid = userCred.user.uid;
+          } catch (createErr) {
+            try {
+              const anonCred = await signInAnonymously(auth);
+              uid = anonCred.user.uid;
+            } catch (anonErr) {
+              // fallback
+            }
+          }
+        }
+        
+        try {
+          await setDoc(doc(db, 'users', uid), {
+            role: 'Admin',
+            email: 'luizmugnai.comex@gmail.com',
+            razaoSocial: 'BYD Operations',
+            status: 'approved'
+          }, { merge: true });
+        } catch (dbErr) {
+          console.error("Failed to save coordinator doc", dbErr);
+        }
+
         onLogin('Admin', {
-          uid: 'admin-luiz',
+          uid: uid,
           email: 'luizmugnai.comex@gmail.com',
           role: 'Coordinator',
           razaoSocial: 'BYD Operations'

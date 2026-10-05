@@ -1,7 +1,7 @@
 import { useState, FormEvent, useEffect, useMemo } from 'react';
 import { TruckAppointment, YardSlot } from '../types';
 import { mockSlots, mockBlacklistedDrivers } from '../mockData';
-import { cn, getSlotCapacityUsage } from '../utils';
+import { cn, getSlotCapacityUsage, sanitizeLicensePlate } from '../utils';
 import { StatusBadge } from './VirtualQueue';
 
 interface CarrierPortalProps {
@@ -38,6 +38,7 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
   const [selectedSlotId, setSelectedSlotId] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverCpf, setDriverCpf] = useState('');
+  const [freeTimeExpiration, setFreeTimeExpiration] = useState('');
   
   // For simplicity, we just show appointments booked by this carrier
   const myAppointments = appointments.filter(a => a.carrier === carrierName);
@@ -67,7 +68,8 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
     const slot = mockSlots.find(s => s.id === selectedSlotId);
     if (!slot) return;
     
-    const isPast = slot.status === 'Completed';
+    const isFutureDate = bookingDate > today;
+    const isPast = isFutureDate ? false : slot.status === 'Completed';
     const isExpiredRealTime = bookingDate === today && currentTimeStr > slot.startTime;
     if (isPast || isExpiredRealTime) {
       alert("This slot has expired. Please select another slot.");
@@ -78,14 +80,15 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
       carrier: carrierName,
       driver: driverName,
       driverCpf,
-      licensePlate,
+      licensePlate: sanitizeLicensePlate(licensePlate),
       containerId,
       blNumber,
       scheduledTime: slot.startTime,
       slotId: slot.id,
       isBitrem,
       containerId2: isBitrem ? containerId2 : undefined,
-      isSpecialWindow
+      isSpecialWindow,
+      freeTimeExpiration: freeTimeExpiration || undefined
     });
 
     setLicensePlate('');
@@ -97,6 +100,7 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
     setDriverName('');
     setDriverCpf('');
     setSelectedSlotId('');
+    setFreeTimeExpiration('');
   };
 
   return (
@@ -175,10 +179,19 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
               <input 
                 type="text" 
                 value={licensePlate}
-                onChange={(e) => setLicensePlate(e.target.value.toUpperCase())}
-                placeholder="ABC-1234"
+                onChange={(e) => setLicensePlate(sanitizeLicensePlate(e.target.value))}
+                placeholder="ABC1234"
                 className="border border-slate-300 rounded px-3 py-2 uppercase font-mono bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 required
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-bold uppercase tracking-wide text-slate-600">Free Time Expiration (Demurrage Limit)</label>
+              <input 
+                type="datetime-local" 
+                value={freeTimeExpiration}
+                onChange={(e) => setFreeTimeExpiration(e.target.value)}
+                className="border border-slate-300 rounded px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-sm"
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -222,7 +235,8 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
             <label className="text-sm font-bold uppercase tracking-wide text-slate-600">Select Available Slot</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                {mockSlots.map(slot => {
-                const isPast = slot.status === 'Completed';
+                const isFutureDate = bookingDate > today;
+                const isPast = isFutureDate ? false : slot.status === 'Completed';
                 const isExpiredRealTime = bookingDate === today && currentTimeStr > slot.startTime;
                 const isExpired = isPast || isExpiredRealTime;
                 const usage = getSlotCapacityUsage(slot.id, appointments);

@@ -10,29 +10,35 @@ export function DailyReport({ appointments }: DailyReportProps) {
   return (
     <main className="flex-1 w-full mx-auto p-4 flex flex-col gap-4 overflow-hidden bg-slate-100">
       <div className="bg-white border border-slate-300 rounded shadow-sm flex flex-col min-h-0 flex-1">
-        <div className="p-3 border-b border-slate-200 bg-slate-50 shrink-0">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-slate-800">Daily Operations Audit Log</h2>
-          <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">Filtered: Completed Cycle (Operated)</p>
+        <div className="p-3 border-b border-slate-200 bg-slate-50 shrink-0 flex justify-between items-center">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-800">Daily Operations Audit Log (Finished Operations)</h2>
+            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">Filtered: Completed Cycle (Operated / Finished)</p>
+          </div>
+          <span className="bg-purple-100 text-purple-800 border border-purple-300 px-3 py-1 rounded text-xs font-bold uppercase tracking-wider">
+            {operatedAppointments.length} Finished Operations
+          </span>
         </div>
         
         <div className="overflow-auto flex-1">
           <table className="w-full text-left text-xs text-slate-700 whitespace-nowrap">
             <thead className="bg-slate-100 border-b border-slate-300 font-bold uppercase tracking-wider text-slate-600 sticky top-0 z-10 shadow-sm">
               <tr>
-                <th className="px-4 py-2 border-r border-slate-200">Carrier</th>
-                <th className="px-4 py-2 border-r border-slate-200">License Plate</th>
-                <th className="px-4 py-2 border-r border-slate-200">Container ID(s)</th>
-                <th className="px-4 py-2 border-r border-slate-200">BL Number</th>
-                <th className="px-4 py-2 border-r border-slate-200 text-center">Slot</th>
-                <th className="px-4 py-2 border-r border-slate-200 text-center">Gate-In</th>
-                <th className="px-4 py-2 border-r border-slate-200 text-center">Gate-Out</th>
-                <th className="px-4 py-2 text-right">Turnaround</th>
+                <th className="px-4 py-2.5 border-r border-slate-200">Carrier</th>
+                <th className="px-4 py-2.5 border-r border-slate-200">License Plate</th>
+                <th className="px-4 py-2.5 border-r border-slate-200">Container ID(s)</th>
+                <th className="px-4 py-2.5 border-r border-slate-200">BL Number</th>
+                <th className="px-4 py-2.5 border-r border-slate-200 text-center">Slot</th>
+                <th className="px-4 py-2.5 border-r border-slate-200 text-center">Gate-In</th>
+                <th className="px-4 py-2.5 border-r border-slate-200 text-center">Gate-Out</th>
+                <th className="px-4 py-2.5 border-r border-slate-200 text-center">Status</th>
+                <th className="px-4 py-2.5 text-right">Turnaround</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white">
               {operatedAppointments.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400 font-bold uppercase tracking-widest">
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400 font-bold uppercase tracking-widest">
                     No completed operations yet
                   </td>
                 </tr>
@@ -49,9 +55,9 @@ export function DailyReport({ appointments }: DailyReportProps) {
 
                   return (
                     <tr key={apt.id} className="hover:bg-blue-50 transition-colors">
-                      <td className="px-4 py-2 border-r border-slate-100 font-medium">{apt.carrier}</td>
-                      <td className="px-4 py-2 border-r border-slate-100 font-mono font-bold">{apt.licensePlate}</td>
-                      <td className="px-4 py-2 border-r border-slate-100 font-mono font-bold">
+                      <td className="px-4 py-2.5 border-r border-slate-100 font-medium">{apt.carrier}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 font-mono font-bold">{apt.licensePlate}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 font-mono font-bold">
                         <div className="flex flex-col">
                           <span>{apt.containerId}</span>
                           {apt.isBitrem && apt.containerId2 && (
@@ -59,11 +65,16 @@ export function DailyReport({ appointments }: DailyReportProps) {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-2 border-r border-slate-100 font-mono text-slate-500">{apt.blNumber}</td>
-                      <td className="px-4 py-2 border-r border-slate-100 text-center font-mono">{apt.scheduledTime}</td>
-                      <td className="px-4 py-2 border-r border-slate-100 text-center font-mono text-blue-700 bg-blue-50/30">{apt.gateInTime || '-'}</td>
-                      <td className="px-4 py-2 border-r border-slate-100 text-center font-mono text-emerald-700 bg-emerald-50/30">{apt.gateOutTime || '-'}</td>
-                      <td className="px-4 py-2 text-right font-mono font-bold">{turnaround}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 font-mono text-slate-500">{apt.blNumber}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 text-center font-mono">{apt.scheduledTime}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 text-center font-mono text-blue-700 bg-blue-50/30">{apt.gateInTime || '-'}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 text-center font-mono text-emerald-700 bg-emerald-50/30">{apt.gateOutTime || '-'}</td>
+                      <td className="px-4 py-2.5 border-r border-slate-100 text-center">
+                        <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-800 border border-purple-300 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
+                          FINISHED
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono font-bold">{turnaround}</td>
                     </tr>
                   );
                 })
