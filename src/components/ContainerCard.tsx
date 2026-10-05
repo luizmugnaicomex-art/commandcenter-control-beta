@@ -145,6 +145,16 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appoi
         )}
       </div>
 
+      {appointment.status !== 'Awaiting Call' && appointment.status !== 'Operated' && onRevertToYard && (
+        <button
+          onClick={() => onRevertToYard(appointment.id)}
+          className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded text-[9px] uppercase font-bold tracking-wider transition-colors shadow-sm mt-1 flex items-center justify-center gap-1"
+          title="Revert status backward"
+        >
+          ↩ Revert ({appointment.status === 'In Yard' ? 'To Transit' : 'To Queue'})
+        </button>
+      )}
+
       {appointment.status === 'Awaiting Call' && onCall && (
         <button
           onClick={() => onCall(appointment.id)}
@@ -227,7 +237,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appoi
                 <button
                   onClick={handleSaveLocation}
                   disabled={!entryGate || !unloadingLocation}
-                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Assign Zone
                 </button>

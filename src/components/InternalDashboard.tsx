@@ -27,9 +27,13 @@ interface InternalDashboardProps {
   onNoShow: (id: string) => void;
   onCreateSpecialWindow: (data: Omit<TruckAppointment, 'id' | 'status'>) => void;
   activeTab: 'dashboard' | 'kanban' | 'loading' | 'masterPlan' | 'report';
+  selectedDate: string;
+  onPrevDay: () => void;
+  onNextDay: () => void;
+  onToday: () => void;
 }
 
-export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onNoShow, onCreateSpecialWindow, activeTab }: InternalDashboardProps) {
+export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onNoShow, onCreateSpecialWindow, activeTab, selectedDate, onPrevDay, onNextDay, onToday }: InternalDashboardProps) {
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
   const [isBlacklistModalOpen, setIsBlacklistModalOpen] = useState(false);
   
@@ -133,7 +137,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
           <KPICard 
             title="Total Scheduled" 
             value={appointments.length + 175} 
-            subtitle="Today's Bookings"
+            subtitle="Bookings for Date"
             icon="truck"
             trend="+12% vs yesterday"
           />
@@ -199,77 +203,122 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
       ) : activeTab === 'report' ? (
         <DailyReport appointments={appointments} />
       ) : activeTab === 'loading' ? (
-        <LoadingPanel appointments={appointments} currentSlot={currentSlot} onGateOut={onGateOut} onCallTruck={onCallTruck} onGateIn={onGateIn} />
+        <LoadingPanel 
+          appointments={appointments} 
+          currentSlot={currentSlot} 
+          onGateOut={onGateOut} 
+          onCallTruck={onCallTruck} 
+          onGateIn={onGateIn} 
+          selectedDate={selectedDate}
+          onPrevDay={onPrevDay}
+          onNextDay={onNextDay}
+          onToday={onToday}
+        />
       ) : (
-        /* Kanban Board (Gestão de Pátio) */
-        <section className="flex-1 flex flex-col xl:flex-row gap-3 min-h-0 flex-1">
-          {/* Column 1: Queue */}
-          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
-            <div className="p-3 bg-amber-500 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
-              <h3 className="text-xs uppercase tracking-widest">Queue (Awaiting)</h3>
-              <span className="bg-amber-600 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                {queueAppointments.length}
+        /* Kanban Board (Gestão de Pátio) with Date Navigation Bar */
+        <div className="flex-1 flex flex-col gap-3 min-h-0">
+          {/* Task 1: Date Navigation Bar */}
+          <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-2.5 shadow-sm shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-800">Operational Date:</span>
+              <span className="text-xs font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded">
+                {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
               </span>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
-              {queueAppointments.map(apt => (
-                <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onCall={onCallTruck} />
-              ))}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onPrevDay}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition-colors"
+                title="Previous Day"
+              >
+                &larr; Prev Day
+              </button>
+              <button
+                onClick={onToday}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold uppercase tracking-wider transition-colors shadow-sm"
+              >
+                Today
+              </button>
+              <button
+                onClick={onNextDay}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition-colors"
+                title="Next Day"
+              >
+                Next Day &rarr;
+              </button>
             </div>
           </div>
 
-          {/* Column 2: In Transit */}
-          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
-            <div className="p-3 bg-emerald-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
-              <h3 className="text-xs uppercase tracking-widest">In Transit</h3>
-              <span className="bg-emerald-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                {transitAppointments.length}
-              </span>
+          <section className="flex-1 flex flex-col xl:flex-row gap-3 min-h-0 flex-1">
+            {/* Column 1: Queue */}
+            <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+              <div className="p-3 bg-amber-500 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+                <h3 className="text-xs uppercase tracking-widest">Queue (Awaiting)</h3>
+                <span className="bg-amber-600 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                  {queueAppointments.length}
+                </span>
+              </div>
+              <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
+                {queueAppointments.map(apt => (
+                  <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onCall={onCallTruck} onRevertToYard={onRevertToYard} />
+                ))}
+              </div>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
-              {transitAppointments.map(apt => (
-                <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onGateIn={onGateIn} onNoShow={onNoShow} />
-              ))}
-            </div>
-          </div>
 
-          {/* Column 3: Active Yard */}
-          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
-            <div className="p-3 bg-blue-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
-              <h3 className="text-xs uppercase tracking-widest">Active Yard</h3>
-              <span className="bg-blue-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                {inYardAppointments.length}
-              </span>
+            {/* Column 2: In Transit */}
+            <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+              <div className="p-3 bg-emerald-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+                <h3 className="text-xs uppercase tracking-widest">In Transit</h3>
+                <span className="bg-emerald-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                  {transitAppointments.length}
+                </span>
+              </div>
+              <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
+                {transitAppointments.map(apt => (
+                  <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onGateIn={onGateIn} onNoShow={onNoShow} onRevertToYard={onRevertToYard} />
+                ))}
+              </div>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
-              {inYardAppointments.map(apt => (
-                <ContainerCard 
-                  key={apt.id} 
-                  appointment={apt} 
-                  appointments={appointments}
-                  onAssignLocation={onAssignLocation}
-                  onGateOut={onGateOut}
-                  avgTurnaround={globalAvgTurnaround || 34}
-                />
-              ))}
-            </div>
-          </div>
 
-          {/* Column 4: Finished */}
-          <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
-            <div className="p-3 bg-purple-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
-              <h3 className="text-xs uppercase tracking-widest">Finished</h3>
-              <span className="bg-purple-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                {finishedAppointments.length}
-              </span>
+            {/* Column 3: Active Yard */}
+            <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+              <div className="p-3 bg-blue-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+                <h3 className="text-xs uppercase tracking-widest">Active Yard</h3>
+                <span className="bg-blue-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                  {inYardAppointments.length}
+                </span>
+              </div>
+              <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
+                {inYardAppointments.map(apt => (
+                  <ContainerCard 
+                    key={apt.id} 
+                    appointment={apt} 
+                    appointments={appointments}
+                    onAssignLocation={onAssignLocation}
+                    onGateOut={onGateOut}
+                    onRevertToYard={onRevertToYard}
+                    avgTurnaround={globalAvgTurnaround || 34}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
-              {finishedAppointments.map(apt => (
-                <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onRevertToYard={onRevertToYard} />
-              ))}
+
+            {/* Column 4: Finished */}
+            <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+              <div className="p-3 bg-purple-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+                <h3 className="text-xs uppercase tracking-widest">Finished</h3>
+                <span className="bg-purple-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                  {finishedAppointments.length}
+                </span>
+              </div>
+              <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
+                {finishedAppointments.map(apt => (
+                  <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onRevertToYard={onRevertToYard} />
+                ))}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       )}
 
       {isSpecialModalOpen && (

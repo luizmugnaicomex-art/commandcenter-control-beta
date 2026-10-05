@@ -14,6 +14,7 @@ export interface TruckAppointment {
   status: TruckStatus;
   scheduledTime: string;
   slotId: string;
+  targetDate?: string;
   gateInTime?: string;
   entryGate?: string;
   unloadingLocation?: string;

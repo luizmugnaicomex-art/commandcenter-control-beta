@@ -13,7 +13,7 @@ import { Login, UserRole, UserDetails } from './components/Login';
 import { cn } from './utils';
 import { collection, query, onSnapshot, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
-import { LayoutDashboard, Kanban, Zap, Calendar, FileText, Bell, LogOut, ShieldCheck, Truck } from 'lucide-react';
+import { LayoutDashboard, Kanban, Zap, Calendar, FileText, Bell, LogOut, Truck } from 'lucide-react';
 
 type ViewMode = 'coordinator' | 'carrier';
 type SidebarTab = 'dashboard' | 'kanban' | 'loading' | 'masterPlan' | 'report';
@@ -26,6 +26,26 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewMode>('coordinator');
   const [activeTab, setActiveTab] = useState<SidebarTab>('kanban');
   const [clockStr, setClockStr] = useState<string>('');
+
+  // Task 1: Date Navigation State
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+
+  const handlePrevDay = () => {
+    const d = new Date(selectedDate + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    setSelectedDate(d.toISOString().split('T')[0]);
+  };
+
+  const handleNextDay = () => {
+    const d = new Date(selectedDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    setSelectedDate(d.toISOString().split('T')[0]);
+  };
+
+  const handleToday = () => {
+    setSelectedDate(todayStr);
+  };
 
   const currentSlot = getCurrentSlot();
   const nextSlot = getNextOpenSlot(currentSlot.id);
@@ -81,7 +101,7 @@ export default function App() {
         items.push({ id: doc.id, ...doc.data() } as MasterPlanItem);
       });
       if (items.length === 0) {
-        const initial = loadDailyPlan();
+        const initial = loadDailyPlan().map(m => ({ ...m, targetDate: todayStr }));
         initial.forEach(async (item) => {
           try {
             await setDoc(doc(db, 'masterPlan', item.id), item);
@@ -93,21 +113,33 @@ export default function App() {
       }
     }, (error) => {
       console.warn("Master plan sync warning:", error);
-      setMasterPlan(loadDailyPlan());
+      setMasterPlan(loadDailyPlan().map(m => ({ ...m, targetDate: todayStr })));
     });
     
     return () => unsubscribe();
   }, [userRole]);
 
+  // Task 1 & 3: Filter appointments and masterPlan by selectedDate
+  const filteredAppointments = appointments.filter(a => {
+    const recordDate = a.targetDate || todayStr;
+    return recordDate === selectedDate;
+  });
+
+  const filteredMasterPlan = masterPlan.filter(m => {
+    const recordDate = m.targetDate || todayStr;
+    return recordDate === selectedDate;
+  });
+
   const handleUploadMasterPlan = async (items: MasterPlanItem[]) => {
     try {
       const batch = writeBatch(db);
-      items.forEach(item => {
+      const updatedItems = items.map(item => ({ ...item, targetDate: selectedDate }));
+      updatedItems.forEach(item => {
         const docRef = doc(db, 'masterPlan', item.id);
         batch.set(docRef, item);
       });
       await batch.commit();
-      setMasterPlan(items);
+      setMasterPlan(updatedItems);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'masterPlan');
     }
@@ -149,7 +181,7 @@ export default function App() {
     try {
       const batch = writeBatch(db);
       const calledApts: TruckAppointment[] = [];
-      appointments.forEach(apt => {
+      filteredAppointments.forEach(apt => {
         if (apt.slotId === nextSlot.id && apt.status === 'Awaiting Call') {
           const aptRef = doc(db, 'appointments', apt.id);
           batch.update(aptRef, { status: 'Called/In Transit' });
@@ -168,12 +200,13 @@ export default function App() {
     const newAppointment = {
       ...newAppointmentData,
       status: 'Awaiting Call',
+      targetDate: selectedDate,
       carrierUid: userDetails?.uid || '',
       createdAt: new Date().toISOString()
     };
     try {
       await setDoc(doc(db, 'appointments', id), cleanForFirestore(newAppointment));
-      alert("Booking confirmed successfully!");
+      alert("Booking confirmed successfully for " + selectedDate + "!");
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `appointments/${id}`);
     }
@@ -184,6 +217,7 @@ export default function App() {
     const newAppointment = {
       ...newAppointmentData,
       status: 'Awaiting Call',
+      targetDate: selectedDate,
       isSpecialWindow: true,
       carrierUid: userDetails?.uid || '',
       createdAt: new Date().toISOString()
@@ -218,10 +252,23 @@ export default function App() {
     }
   };
 
-  const handleRevertToYard = async (id: string) => {
+  // Task 2: Multi-Directional Status Flow (Backward Revert)
+  const handleRevertBackward = async (id: string) => {
+    const apt = appointments.find(a => a.id === id);
+    if (!apt) return;
+
+    let updateData: any = {};
+    if (apt.status === 'Operated') {
+      updateData = { status: 'In Yard', gateOutTime: null };
+    } else if (apt.status === 'In Yard') {
+      updateData = { status: 'Called/In Transit', gateInTime: null, entryGate: null, unloadingLocation: null };
+    } else if (apt.status === 'Called/In Transit') {
+      updateData = { status: 'Awaiting Call' };
+    }
+
     const aptRef = doc(db, 'appointments', id);
     try {
-      await updateDoc(aptRef, cleanForFirestore({ status: 'In Yard', gateOutTime: null }));
+      await updateDoc(aptRef, cleanForFirestore(updateData));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
     }
@@ -237,7 +284,7 @@ export default function App() {
     let targetSlot = null;
     for (let i = currentSlotIndex + 1; i < mockSlots.length; i++) {
       const slot = mockSlots[i];
-      const usage = appointments.filter(a => a.slotId === slot.id).reduce((sum, a) => sum + (a.isBitrem ? 2 : 1), 0);
+      const usage = filteredAppointments.filter(a => a.slotId === slot.id).reduce((sum, a) => sum + (a.isBitrem ? 2 : 1), 0);
       if (slot.capacity - usage >= weight) {
         targetSlot = slot;
         break;
@@ -304,7 +351,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen bg-slate-50 flex font-sans text-slate-900 overflow-hidden">
-      {/* Task 1: Persistent Dark-Themed Left Sidebar Navigation */}
+      {/* Persistent Dark-Themed Left Sidebar Navigation */}
       <aside className="w-64 bg-slate-900 text-slate-300 border-r border-slate-800 flex flex-col justify-between shrink-0 select-none">
         <div className="flex flex-col">
           {/* Brand Logo Header */}
@@ -406,7 +453,7 @@ export default function App() {
 
       {/* Main Right Column */}
       <div className="flex-1 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
-        {/* Task 1: Clean White Top Header */}
+        {/* Clean White Top Header */}
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-bold uppercase tracking-wider text-slate-800">
@@ -444,8 +491,8 @@ export default function App() {
         {/* Main Canvas Area */}
         {activeView === 'coordinator' ? (
           <InternalDashboard 
-            appointments={appointments}
-            masterPlan={masterPlan}
+            appointments={filteredAppointments}
+            masterPlan={filteredMasterPlan}
             onUploadMasterPlan={handleUploadMasterPlan}
             onUpdateMasterPlanItem={handleUpdateMasterPlanItem}
             currentSlot={currentSlot}
@@ -453,16 +500,20 @@ export default function App() {
             onCallNext={handleCallNext}
             onAssignLocation={handleAssignLocation}
             onGateOut={handleGateOut}
-            onRevertToYard={handleRevertToYard}
+            onRevertToYard={handleRevertBackward}
             onCallTruck={handleCallTruck}
             onGateIn={handleGateIn}
             onNoShow={handleNoShow}
             onCreateSpecialWindow={handleCreateSpecialWindow}
             activeTab={activeTab}
+            selectedDate={selectedDate}
+            onPrevDay={handlePrevDay}
+            onNextDay={handleNextDay}
+            onToday={handleToday}
           />
         ) : (
           <CarrierPortal 
-            appointments={appointments}
+            appointments={filteredAppointments}
             carrierName={userDetails?.razaoSocial || userDetails?.email || 'Carrier'}
             onBookSlot={handleBookSlot}
           />
