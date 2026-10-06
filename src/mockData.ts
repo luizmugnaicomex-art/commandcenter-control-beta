@@ -34,6 +34,8 @@ export const mockAppointments: TruckAppointment[] = [
 ];
 
 export const mockSlots: YardSlot[] = [
+  // Bloco 0: Madrugada / Início da manhã
+  { id: '0', startTime: '06:00', endTime: '07:00', capacity: 30, status: 'Completed' },
   // Bloco 1: Manhã
   { id: '1', startTime: '07:00', endTime: '08:00', capacity: 30, status: 'Completed' },
   // 08:00 - 08:15: PAUSA (Chegada de funcionários)

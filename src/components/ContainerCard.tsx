@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TruckAppointment, YARD_ZONES } from '../types';
-import { cn, isDemurrageRisk } from '../utils';
+import { cn, isDemurrageRisk, getPunctualityStatus } from '../utils';
 import { Clock, MapPin } from 'lucide-react';
 import { mockSlots } from '../mockData';
 
@@ -9,6 +9,7 @@ interface ContainerCardProps {
   appointments?: TruckAppointment[];
   onCall?: (id: string) => void;
   onGateIn?: (id: string) => void;
+  onArrivedAtLine?: (id: string) => void;
   onAssignLocation?: (id: string, entryGate: string, unloadingLocation: string) => void;
   onGateOut?: (id: string) => void;
   onRevertToYard?: (id: string) => void;
@@ -16,7 +17,7 @@ interface ContainerCardProps {
   avgTurnaround?: number;
 }
 
-export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appointments = [], onCall, onGateIn, onAssignLocation, onGateOut, onRevertToYard, onNoShow, avgTurnaround }) => {
+export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appointments = [], onCall, onGateIn, onArrivedAtLine, onAssignLocation, onGateOut, onRevertToYard, onNoShow, avgTurnaround }) => {
   const [entryGate, setEntryGate] = useState(appointment.entryGate || '');
   const [unloadingLocation, setUnloadingLocation] = useState(appointment.unloadingLocation || '');
 
@@ -50,6 +51,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appoi
   
   const slot = mockSlots.find(s => s.id === appointment.slotId);
   const slotDisplay = slot ? `${slot.startTime} - ${slot.endTime}` : appointment.scheduledTime;
+  const punctuality = getPunctualityStatus(slotDisplay);
 
   const handleSaveLocation = () => {
     if (onAssignLocation && entryGate && unloadingLocation) {
@@ -77,6 +79,27 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appoi
         <div className="text-[9px] font-black uppercase tracking-widest text-red-700 bg-red-100 border border-red-200 px-2 py-1 rounded text-center shadow-sm flex items-center justify-center gap-1">
           <span>⚠️ DEMURRAGE RISK</span>
           {appointment.freeTimeExpiration && <span className="text-[8px] font-mono">({new Date(appointment.freeTimeExpiration).toLocaleString()})</span>}
+        </div>
+      )}
+
+      {appointment.isEnRoute && appointment.status === 'Awaiting Call' && (
+        <div className="text-[9px] font-black uppercase tracking-widest text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-1 rounded text-center shadow-sm animate-pulse flex items-center justify-center gap-1">
+          <span>🚚 DRIVER EN ROUTE</span>
+        </div>
+      )}
+
+      {appointment.status === 'NO SHOW' && (
+        <div className="text-[9px] font-black uppercase tracking-widest text-red-700 bg-red-100 border border-red-200 px-2 py-1 rounded text-center shadow-sm flex items-center justify-center gap-1">
+          <span>⚠️ NO SHOW / MISSED WINDOW</span>
+        </div>
+      )}
+
+      {appointment.status !== 'Operated' && appointment.status !== 'NO SHOW' && (
+        <div className={cn(
+          "text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded text-center shadow-sm border flex items-center justify-center gap-1",
+          punctuality.colorClass
+        )}>
+          <span>{punctuality.label}</span>
         </div>
       )}
 
@@ -151,7 +174,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appoi
           className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded text-[9px] uppercase font-bold tracking-wider transition-colors shadow-sm mt-1 flex items-center justify-center gap-1"
           title="Revert status backward"
         >
-          ↩ Revert ({appointment.status === 'In Yard' ? 'To Transit' : 'To Queue'})
+          ↩ Revert
         </button>
       )}
 
@@ -164,19 +187,39 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({ appointment, appoi
         </button>
       )}
 
-      {appointment.status === 'Called/In Transit' && onGateIn && (
+      {appointment.status === 'Called/In Transit' && onArrivedAtLine && (
         <div className="mt-1 flex gap-1.5">
           <button
-            onClick={() => onGateIn(appointment.id)}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors"
+            onClick={() => onArrivedAtLine(appointment.id)}
+            className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shadow-sm"
           >
-            Gate-In
+            Arrived at Line
           </button>
           {onNoShow && (
             <button
               onClick={() => onNoShow(appointment.id)}
               className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shrink-0"
-              title="No Show - Reschedule to next slot"
+              title="No Show"
+            >
+              No Show
+            </button>
+          )}
+        </div>
+      )}
+
+      {appointment.status === 'Physical Line' && onGateIn && (
+        <div className="mt-1 flex gap-1.5">
+          <button
+            onClick={() => onGateIn(appointment.id)}
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shadow-sm"
+          >
+            Gate-In (Enter Yard)
+          </button>
+          {onNoShow && (
+            <button
+              onClick={() => onNoShow(appointment.id)}
+              className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shrink-0"
+              title="No Show"
             >
               No Show
             </button>

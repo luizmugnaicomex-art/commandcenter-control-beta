@@ -1,7 +1,7 @@
 import React, { useState, DragEvent, ChangeEvent } from 'react';
 import { TruckAppointment, MasterPlanItem } from '../types';
 import { cn } from '../utils';
-import { AlertCircle, CheckCircle2, AlertTriangle, Send, Upload, FileSpreadsheet, Loader2, Check, Calendar } from 'lucide-react';
+import { AlertCircle, CheckCircle2, AlertTriangle, Send, Upload, FileSpreadsheet, Loader2, Check, Calendar, Search } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface MasterPlanReconciliationProps {
@@ -9,13 +9,18 @@ interface MasterPlanReconciliationProps {
   masterPlan: MasterPlanItem[];
   onUploadMasterPlan: (items: MasterPlanItem[]) => void;
   onUpdateMasterPlanItem: (item: MasterPlanItem) => void;
+  selectedDate: string;
+  onPrevDay: () => void;
+  onNextDay: () => void;
+  onToday: () => void;
 }
 
-export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> = ({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem }) => {
+export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> = ({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, selectedDate, onPrevDay, onNextDay, onToday }) => {
   const [alertedCarriers, setAlertedCarriers] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [containerSearch, setContainerSearch] = useState('');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -32,7 +37,7 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
     currentDemurrage.setDate(currentDemurrage.getDate() + 1);
     const newDemurrageStr = currentDemurrage.toISOString().split('T')[0];
 
-    const currentTarget = new Date(item.targetDate || Date.now());
+    const currentTarget = new Date(item.targetDate || selectedDate);
     currentTarget.setDate(currentTarget.getDate() + 1);
     const newTargetStr = currentTarget.toISOString().split('T')[0];
 
@@ -52,7 +57,6 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
     data.forEach((row, idx) => {
       const excelStatus = String(row['STATUS'] || row['Status'] || row['status'] || 'PENDENTE').trim().toUpperCase();
       
-      // Filter out finished status if specified
       if (excelStatus && (excelStatus.includes('CONCL') || excelStatus.includes('FINI') || excelStatus.includes('COMPL') || excelStatus.includes('DONE'))) {
         return;
       }
@@ -75,7 +79,7 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
           id: `mp-excel-${idx}-${Date.now()}`,
           containerId,
           blNumber: blNumber || `BL-${Math.floor(Math.random() * 900000 + 100000)}`,
-          targetDate: new Date().toISOString().split('T')[0],
+          targetDate: selectedDate,
           carrierName,
           deliverySite,
           demurrageDate,
@@ -93,7 +97,7 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
 
     if (parsedItems.length > 0) {
       onUploadMasterPlan(parsedItems);
-      showToast(`Successfully imported and saved ${parsedItems.length} active delivery plan items to Firestore with full data grid mapping!`);
+      showToast(`Successfully imported and saved ${parsedItems.length} active delivery plan items for ${selectedDate}!`);
     } else {
       showToast('No valid active container records found matching the required schema.');
     }
@@ -143,195 +147,179 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
     }
   };
 
+  // Task 2: Filter masterPlan by selectedDate and containerSearch
+  const filteredMasterPlan = masterPlan.filter(item => {
+    const itemDate = item.targetDate || new Date().toISOString().split('T')[0];
+    const matchesDate = itemDate === selectedDate;
+    const matchesSearch = item.containerId.toLowerCase().includes(containerSearch.toLowerCase()) || 
+                          item.blNumber.toLowerCase().includes(containerSearch.toLowerCase()) || 
+                          item.carrierName.toLowerCase().includes(containerSearch.toLowerCase());
+    return matchesDate && matchesSearch;
+  });
+
   return (
-    <main className="flex-1 w-full mx-auto p-4 flex flex-col gap-4 overflow-hidden bg-slate-100 relative">
-      {/* Toast Notification Banner */}
+    <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto">
       {toastMessage && (
-        <div className="absolute top-4 right-4 z-50 bg-slate-900 text-white px-4 py-3 rounded-lg shadow-xl border border-slate-700 flex items-center gap-3 animate-fade-in max-w-md">
-          <div className="p-1 bg-blue-600 rounded-full text-white shrink-0">
-            <Check className="w-4 h-4" />
-          </div>
-          <p className="text-xs font-medium leading-relaxed">{toastMessage}</p>
+        <div className="bg-blue-600 text-white p-3 rounded-lg text-xs font-bold shadow-md flex items-center justify-between shrink-0 animate-fadeIn">
+          <span>{toastMessage}</span>
+          <button onClick={() => setToastMessage(null)} className="text-blue-200 hover:text-white">&times;</button>
         </div>
       )}
 
-      {/* Upload Zone */}
-      <div 
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={cn(
-          "border-2 border-dashed rounded-lg p-6 bg-white text-center flex flex-col items-center justify-center gap-2 transition-all shrink-0 shadow-sm relative",
-          isDragging ? "border-blue-500 bg-blue-50/50 scale-[1.01]" : "border-slate-300 hover:border-slate-400"
-        )}
-      >
-        {isLoading ? (
-          <div className="flex flex-col items-center gap-2 py-4">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Parsing and saving Delivery Plan...</p>
-          </div>
-        ) : (
-          <>
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-full">
-              <FileSpreadsheet className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Upload Daily Delivery Plan (.xlsx)</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Drag & drop your Excel sheet here to save and reconcile</p>
-            </div>
-            <label className="mt-2 inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-colors">
-              <Upload className="w-3.5 h-3.5" />
-              <span>Browse File</span>
-              <input type="file" accept=".xlsx, .xls, .csv" onChange={onFileChange} className="hidden" />
-            </label>
-          </>
-        )}
+      {/* Task 2: Date Navigation Bar */}
+      <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-2.5 shadow-sm shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-black uppercase tracking-wider text-slate-800">Master Plan Date:</span>
+          <span className="text-xs font-mono font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded">
+            {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onPrevDay}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition-colors"
+          >
+            &larr; Prev Day
+          </button>
+          <button
+            onClick={onToday}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-bold uppercase tracking-wider transition-colors shadow-sm"
+          >
+            Today
+          </button>
+          <button
+            onClick={onNextDay}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold transition-colors"
+          >
+            Next Day &rarr;
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white border border-slate-300 rounded shadow-sm flex flex-col min-h-0 flex-1 overflow-hidden">
-        <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0 flex justify-between items-center">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-800">Master Plan vs Actual Reconciliation & Backlog Control</h2>
-            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">Persisted Deliveries Checked against System Bookings ({masterPlan.length} items loaded)</p>
+      {/* Upload & Search Filters Bar */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+        <div 
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={cn(
+            "md:col-span-2 border-2 border-dashed rounded-lg p-4 flex items-center justify-between gap-4 transition-all bg-white",
+            isDragging ? "border-purple-500 bg-purple-50" : "border-slate-300 hover:border-slate-400"
+          )}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-purple-100 text-purple-700">
+              <FileSpreadsheet className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">Import Master Delivery Plan (Excel)</h4>
+              <p className="text-[11px] text-slate-500">Drag & drop your daily dispatch Excel sheet for {selectedDate}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-xs font-bold">
-            <span className="flex items-center gap-1 text-purple-700 bg-purple-50 px-2.5 py-1 rounded border border-purple-200">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Finished
-            </span>
-            <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Matched
-            </span>
-            <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2.5 py-1 rounded border border-amber-200">
-              <AlertTriangle className="w-3.5 h-3.5" /> Mismatch
-            </span>
-            <span className="flex items-center gap-1 text-red-700 bg-red-50 px-2.5 py-1 rounded border border-red-200">
-              <AlertCircle className="w-3.5 h-3.5" /> Missing Booking
-            </span>
-          </div>
+          <label className="cursor-pointer bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2 shrink-0">
+            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+            <span>Upload File</span>
+            <input type="file" accept=".xlsx, .xls, .csv" onChange={onFileChange} className="hidden" disabled={isLoading} />
+          </label>
         </div>
-        
-        <div className="overflow-x-auto overflow-y-auto flex-1">
-          <table className="w-full text-left text-xs text-slate-700 whitespace-nowrap border-collapse">
-            <thead className="bg-slate-100 border-b border-slate-300 font-bold uppercase tracking-wider text-slate-600 sticky top-0 z-10 shadow-sm">
+
+        {/* Task 2: Container Search Bar */}
+        <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col justify-center gap-1.5 shadow-sm">
+          <label className="text-xs font-bold uppercase tracking-wide text-slate-600 flex items-center gap-1.5">
+            <Search className="w-3.5 h-3.5 text-purple-600" />
+            Search Container / BL
+          </label>
+          <input 
+            type="text"
+            value={containerSearch}
+            onChange={(e) => setContainerSearch(e.target.value)}
+            placeholder="Type container ID or BL..."
+            className="border border-slate-300 rounded px-3 py-1.5 text-xs bg-slate-50 focus:bg-white focus:outline-none focus:border-purple-500 uppercase font-mono"
+          />
+        </div>
+      </div>
+
+      {/* Reconciliation Table */}
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+        <div className="p-3 bg-slate-100 border-b border-slate-200 flex justify-between items-center shrink-0">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Master Plan vs Yard Appointments Reconciliation ({selectedDate})</h3>
+          <span className="bg-purple-100 text-purple-800 px-2.5 py-0.5 rounded text-[10px] font-bold uppercase">
+            {filteredMasterPlan.length} Containers Scheduled
+          </span>
+        </div>
+
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-left text-xs text-slate-700 whitespace-nowrap">
+            <thead className="bg-slate-50 border-b border-slate-200 font-bold uppercase tracking-wider text-slate-500 sticky top-0 z-10">
               <tr>
-                <th className="px-4 py-2.5 border-r border-slate-200">Container ID</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">BL Number</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Operation Scope</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Vessel</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Shipowner</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Type / Model</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Cost</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Transportation Company</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Delivery Site</th>
-                <th className="px-4 py-2.5 border-r border-slate-200">Demurrage Date</th>
-                <th className="px-4 py-2.5 border-r border-slate-200 text-center">Excel Status</th>
-                <th className="px-4 py-2.5 border-r border-slate-200 text-center">Reconciliation Status</th>
-                <th className="px-4 py-2.5 text-center">Action / Backlog Control</th>
+                <th className="px-4 py-3">Container ID</th>
+                <th className="px-4 py-3">BL Number</th>
+                <th className="px-4 py-3">Carrier / Company</th>
+                <th className="px-4 py-3 text-center">Delivery Site</th>
+                <th className="px-4 py-3 text-center">Demurrage Limit</th>
+                <th className="px-4 py-3 text-center">Booking Status</th>
+                <th className="px-4 py-3 text-right">Actions / Reconciliation</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {masterPlan.map(item => {
-                const matchingApt = appointments.find(a => a.containerId === item.containerId || a.containerId2 === item.containerId);
-                
-                let status: 'MATCHED' | 'MISSING BOOKING' | 'MISMATCH' | 'FINISHED' = 'MISSING BOOKING';
-                let details = '';
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {filteredMasterPlan.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400 font-bold uppercase tracking-widest">
+                    No master plan records found for {selectedDate}
+                  </td>
+                </tr>
+              ) : (
+                filteredMasterPlan.map(item => {
+                  const hasBooking = appointments.some(a => a.containerId === item.containerId || a.blNumber === item.blNumber);
+                  const isAlerted = alertedCarriers[item.containerId];
 
-                if (matchingApt) {
-                  if (matchingApt.status === 'Operated') {
-                    status = 'FINISHED';
-                  } else {
-                    const carrierMatch = matchingApt.carrier.toLowerCase() === item.carrierName.toLowerCase();
-                    const siteMatch = !matchingApt.unloadingLocation || matchingApt.unloadingLocation.toLowerCase() === item.deliverySite.toLowerCase();
-                    
-                    if (carrierMatch && siteMatch) {
-                      status = 'MATCHED';
-                    } else {
-                      status = 'MISMATCH';
-                      if (!carrierMatch) details += `Carrier diff (${matchingApt.carrier}); `;
-                      if (!siteMatch) details += `Site diff (${matchingApt.unloadingLocation || 'Unassigned'});`;
-                    }
-                  }
-                }
-
-                return (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors text-xs">
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-mono font-bold text-slate-900">{item.containerId}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-mono text-slate-500">{item.blNumber}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-semibold text-blue-700">{item.operationType || 'UNLOAD'}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 text-slate-700">{item.vessel || 'MSC MARIE'}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 text-slate-700">{item.shipowner || 'MSC'}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-mono text-slate-800">{item.materialType || 'PBP-SC3H'} / {item.model || 'ATTO -2'}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-mono text-emerald-700 font-semibold">{item.containerCost || '$1,250'}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-medium">{item.carrierName}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100">{item.deliverySite}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 font-mono text-red-600 font-bold">{item.demurrageDate}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 text-center font-mono text-[11px] text-slate-600 bg-slate-50 font-bold">{item.excelStatus || 'PENDENTE'}</td>
-                    <td className="px-4 py-2.5 border-r border-slate-100 text-center">
-                      {status === 'FINISHED' && (
-                        <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-800 border border-purple-300 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
-                          <CheckCircle2 className="w-3 h-3" /> FINISHED
-                        </span>
-                      )}
-                      {status === 'MATCHED' && (
-                        <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
-                          <CheckCircle2 className="w-3 h-3" /> MATCHED
-                        </span>
-                      )}
-                      {status === 'MISSING BOOKING' && (
-                        <span className="inline-flex items-center gap-1 bg-red-100 text-red-800 border border-red-300 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
-                          <AlertCircle className="w-3 h-3" /> MISSING BOOKING
-                        </span>
-                      )}
-                      {status === 'MISMATCH' && (
-                        <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider" title={details}>
-                          <AlertTriangle className="w-3 h-3" /> MISMATCH
-                          {details && <span className="text-[9px] font-normal text-amber-900 ml-1">({details})</span>}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 text-center flex items-center justify-center gap-2">
-                      {status === 'FINISHED' ? (
-                        <span className="text-[10px] text-purple-700 font-bold uppercase tracking-wider">Operation Completed</span>
-                      ) : (
-                        <>
-                          {status === 'MISSING BOOKING' && (
-                            <button
-                              onClick={() => handleAlertCarrier(item.carrierName, item.containerId)}
-                              disabled={alertedCarriers[item.containerId]}
-                              className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
-                            >
-                              <Send className="w-3 h-3" />
-                              {alertedCarriers[item.containerId] ? 'Alerted ✓' : 'Alert Carrier'}
-                            </button>
-                          )}
-                          {status === 'MISMATCH' && (
-                            <button
-                              onClick={() => showToast(`Reviewing discrepancy for container ${item.containerId} with ${item.carrierName}. Discrepancy logged for review.`)}
-                              className="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
-                            >
-                              Review
-                            </button>
-                          )}
-                          {status === 'MATCHED' && (
-                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">In Progress</span>
-                          )}
+                  return (
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-slate-900">{item.containerId}</td>
+                      <td className="px-4 py-3 font-mono text-slate-600">{item.blNumber}</td>
+                      <td className="px-4 py-3 font-medium text-slate-800">{item.carrierName}</td>
+                      <td className="px-4 py-3 text-center font-medium">{item.deliverySite}</td>
+                      <td className="px-4 py-3 text-center font-mono text-red-600 font-bold">{item.demurrageDate}</td>
+                      <td className="px-4 py-3 text-center">
+                        {hasBooking ? (
+                          <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold text-[10px] uppercase">
+                            <CheckCircle2 className="w-3 h-3" /> Booked & Scheduled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold text-[10px] uppercase">
+                            <AlertTriangle className="w-3 h-3" /> Missing Booking
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-1">
+                        {!hasBooking && !isAlerted && (
                           <button
-                            onClick={() => handleMoveToNextDay(item)}
-                            title="Move container to next day due to backlog"
-                            className="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
+                            onClick={() => handleAlertCarrier(item.carrierName, item.containerId)}
+                            className="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm"
                           >
-                            <Calendar className="w-3 h-3" /> Move +1d
+                            Alert Carrier
                           </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                        )}
+                        {isAlerted && (
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                            Alert Dispatched ✓
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleMoveToNextDay(item)}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm"
+                        >
+                          Reschedule Backlog &rarr;
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
-    </main>
+    </div>
   );
 };

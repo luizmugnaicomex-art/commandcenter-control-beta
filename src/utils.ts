@@ -19,7 +19,7 @@ export function getNextOpenSlot(currentSlotId: string): YardSlot | undefined {
 
 export function getSlotCapacityUsage(slotId: string, appointments: import('./types').TruckAppointment[]): number {
   return appointments
-    .filter(a => a.slotId === slotId)
+    .filter(a => a.slotId === slotId && a.status !== 'NO SHOW' && a.status !== 'Operated')
     .reduce((total, apt) => total + (apt.isBitrem ? 2 : 1), 0);
 }
 
@@ -92,5 +92,57 @@ export function cleanForFirestore<T extends Record<string, any>>(obj: T): Record
   }
   return cleaned;
 }
+
+export type PunctualityStatus = 'EARLY' | 'ON TIME' | 'LATE';
+
+export function getPunctualityStatus(scheduledTime?: string): { status: PunctualityStatus; label: string; colorClass: string } {
+  if (!scheduledTime) return { status: 'ON TIME', label: '✅ ON TIME', colorClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+
+  const parts = scheduledTime.split('-').map(p => p.trim());
+  const startStr = parts[0];
+  const endStr = parts[1] || startStr;
+
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const parseMinutes = (timeStr: string) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
+  };
+
+  const startMins = parseMinutes(startStr);
+  const endMins = parseMinutes(endStr);
+
+  if (startMins === null || endMins === null) {
+    return { status: 'ON TIME', label: '✅ ON TIME', colorClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+  }
+
+  if (currentMinutes < startMins - 15) {
+    const diff = startMins - currentMinutes;
+    const hrs = Math.floor(diff / 60);
+    const mins = diff % 60;
+    const diffLabel = hrs > 0 ? `-${hrs}h ${mins}m` : `-${mins}m`;
+    return { status: 'EARLY', label: `⏳ EARLY (${diffLabel})`, colorClass: 'bg-blue-100 text-blue-800 border-blue-200' };
+  } else if (currentMinutes > endMins + 15) {
+    const diff = currentMinutes - endMins;
+    const hrs = Math.floor(diff / 60);
+    const mins = diff % 60;
+    const diffLabel = hrs > 0 ? `+${hrs}h ${mins}m` : `+${mins}m`;
+    return { status: 'LATE', label: `🚨 LATE (${diffLabel})`, colorClass: 'bg-red-100 text-red-800 border-red-200' };
+  } else {
+    return { status: 'ON TIME', label: `✅ ON TIME`, colorClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+  }
+}
+
+export function generateGatePin(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let pin = '';
+  for (let i = 0; i < 4; i++) {
+    pin += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return pin;
+}
+
 
 

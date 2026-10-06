@@ -4,12 +4,14 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getCurrentSlot, getNextOpenSlot, OperationType, handleFirestoreError, cleanForFirestore } from './utils';
+import { getCurrentSlot, getNextOpenSlot, OperationType, handleFirestoreError, cleanForFirestore, generateGatePin } from './utils';
 import { mockSlots, loadDailyPlan } from './mockData';
 import { TruckAppointment, MasterPlanItem } from './types';
 import { InternalDashboard } from './components/InternalDashboard';
 import { CarrierPortal } from './components/CarrierPortal';
+import { MobileClerkApp } from './components/MobileClerkApp';
 import { Login, UserRole, UserDetails } from './components/Login';
+import { Language, t } from './i18n';
 import { cn } from './utils';
 import { collection, query, onSnapshot, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
@@ -26,8 +28,8 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewMode>('coordinator');
   const [activeTab, setActiveTab] = useState<SidebarTab>('kanban');
   const [clockStr, setClockStr] = useState<string>('');
+  const [lang, setLang] = useState<Language>('en');
 
-  // Task 1: Date Navigation State
   const todayStr = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
 
@@ -119,7 +121,6 @@ export default function App() {
     return () => unsubscribe();
   }, [userRole]);
 
-  // Task 1 & 3: Filter appointments and masterPlan by selectedDate
   const filteredAppointments = appointments.filter(a => {
     const recordDate = a.targetDate || todayStr;
     return recordDate === selectedDate;
@@ -163,11 +164,15 @@ export default function App() {
       setUserDetails({
         uid: 'admin-luiz',
         email: 'luizmugnai.comex@gmail.com',
-        role: 'Coordinator',
-        razaoSocial: 'BYD Operations'
+        role: role,
+        razaoSocial: role === 'Carrier' ? 'My Transport Co.' : 'BYD Operations'
       });
     }
-    setActiveView(role === 'Admin' ? 'coordinator' : 'carrier');
+    if (role === 'Carrier') {
+      setActiveView('carrier');
+    } else {
+      setActiveView('coordinator');
+    }
   };
 
   const handleLogout = () => {
@@ -180,15 +185,12 @@ export default function App() {
     
     try {
       const batch = writeBatch(db);
-      const calledApts: TruckAppointment[] = [];
       filteredAppointments.forEach(apt => {
         if (apt.slotId === nextSlot.id && apt.status === 'Awaiting Call') {
           const aptRef = doc(db, 'appointments', apt.id);
           batch.update(aptRef, { status: 'Called/In Transit' });
-          calledApts.push(apt);
         }
       });
-      
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'appointments');
@@ -201,6 +203,7 @@ export default function App() {
       ...newAppointmentData,
       status: 'Awaiting Call',
       targetDate: selectedDate,
+      gatePin: newAppointmentData.gatePin || generateGatePin(),
       carrierUid: userDetails?.uid || '',
       createdAt: new Date().toISOString()
     };
@@ -219,6 +222,7 @@ export default function App() {
       status: 'Awaiting Call',
       targetDate: selectedDate,
       isSpecialWindow: true,
+      gatePin: newAppointmentData.gatePin || generateGatePin(),
       carrierUid: userDetails?.uid || '',
       createdAt: new Date().toISOString()
     };
@@ -252,7 +256,6 @@ export default function App() {
     }
   };
 
-  // Task 2: Multi-Directional Status Flow (Backward Revert)
   const handleRevertBackward = async (id: string) => {
     const apt = appointments.find(a => a.id === id);
     if (!apt) return;
@@ -261,7 +264,9 @@ export default function App() {
     if (apt.status === 'Operated') {
       updateData = { status: 'In Yard', gateOutTime: null };
     } else if (apt.status === 'In Yard') {
-      updateData = { status: 'Called/In Transit', gateInTime: null, entryGate: null, unloadingLocation: null };
+      updateData = { status: 'Physical Line', gateInTime: null, entryGate: null, unloadingLocation: null };
+    } else if (apt.status === 'Physical Line') {
+      updateData = { status: 'Called/In Transit' };
     } else if (apt.status === 'Called/In Transit') {
       updateData = { status: 'Awaiting Call' };
     }
@@ -275,32 +280,46 @@ export default function App() {
   };
 
   const handleNoShow = async (id: string) => {
-    const apt = appointments.find(a => a.id === id);
-    if (!apt) return;
-    
-    const weight = apt.isBitrem ? 2 : 1;
-    const currentSlotIndex = mockSlots.findIndex(s => s.id === apt.slotId);
-    
-    let targetSlot = null;
-    for (let i = currentSlotIndex + 1; i < mockSlots.length; i++) {
-      const slot = mockSlots[i];
-      const usage = filteredAppointments.filter(a => a.slotId === slot.id).reduce((sum, a) => sum + (a.isBitrem ? 2 : 1), 0);
-      if (slot.capacity - usage >= weight) {
-        targetSlot = slot;
-        break;
-      }
+    const aptRef = doc(db, 'appointments', id);
+    try {
+      await updateDoc(aptRef, cleanForFirestore({ status: 'NO SHOW' }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
     }
-    
-    if (!targetSlot) return;
-    
+  };
+
+  const handleMarkEnRoute = async (id: string) => {
+    const aptRef = doc(db, 'appointments', id);
+    try {
+      await updateDoc(aptRef, cleanForFirestore({ isEnRoute: true }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
+    }
+  };
+
+  const handleReschedule = async (id: string, newSlotId: string) => {
+    const slot = mockSlots.find(s => s.id === newSlotId);
+    if (!slot) return;
     const aptRef = doc(db, 'appointments', id);
     try {
       await updateDoc(aptRef, cleanForFirestore({
-        slotId: targetSlot.id,
-        scheduledTime: targetSlot.startTime,
-        noShowCount: (apt.noShowCount || 0) + 1,
         status: 'Awaiting Call',
+        slotId: slot.id,
+        scheduledTime: slot.startTime,
+        isEnRoute: false
       }));
+      alert("Appointment successfully rescheduled to slot " + slot.startTime + "!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
+    }
+  };
+
+  // Task 3: Carrier Edit Autonomy
+  const handleUpdateAppointment = async (id: string, updatedData: Partial<TruckAppointment>) => {
+    const aptRef = doc(db, 'appointments', id);
+    try {
+      await updateDoc(aptRef, cleanForFirestore(updatedData));
+      alert("Booking updated successfully!");
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
     }
@@ -331,6 +350,15 @@ export default function App() {
     }
   };
 
+  const handleArrivedAtLine = async (id: string) => {
+    const aptRef = doc(db, 'appointments', id);
+    try {
+      await updateDoc(aptRef, cleanForFirestore({ status: 'Physical Line' }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
+    }
+  };
+
   const handleGateIn = async (id: string) => {
     const now = new Date();
     const hours = String(now.getHours()).padStart(2, '0');
@@ -345,13 +373,48 @@ export default function App() {
     }
   };
 
+  const handleCloseDaySweep = async () => {
+    if (!window.confirm(`Are you sure you want to close the day (${selectedDate}) and sweep all pending/unattended trucks to NO SHOW?`)) return;
+    
+    try {
+      const batch = writeBatch(db);
+      let count = 0;
+      appointments.forEach(apt => {
+        const isTargetDay = apt.targetDate === selectedDate || !apt.targetDate;
+        const isPending = apt.status === 'Awaiting Call' || apt.status === 'Called/In Transit' || apt.status === 'Physical Line';
+        if (isTargetDay && isPending) {
+          const aptRef = doc(db, 'appointments', apt.id);
+          batch.update(aptRef, { status: 'NO SHOW', noShowCount: (apt.noShowCount || 0) + 1 });
+          count++;
+        }
+      });
+      await batch.commit();
+      alert(`✅ End-of-Day Sweep Complete: ${count} unattended appointment(s) moved to NO SHOW and capacity released.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'appointments');
+    }
+  };
+
+  if (userRole === 'Clerk') {
+    return (
+      <MobileClerkApp 
+        appointments={appointments}
+        onArrivedAtLine={handleArrivedAtLine}
+        onGateIn={handleGateIn}
+        onLogout={handleLogout}
+        clerkName={userDetails?.razaoSocial || userDetails?.email || 'Logistics Clerk'}
+        selectedDate={selectedDate}
+      />
+    );
+  }
+
   if (!userRole) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
     <div className="h-screen w-screen bg-slate-50 flex font-sans text-slate-900 overflow-hidden">
-      {/* Persistent Dark-Themed Left Sidebar Navigation */}
+      {/* Persistent Left Sidebar Navigation */}
       <aside className="w-64 bg-slate-900 text-slate-300 border-r border-slate-800 flex flex-col justify-between shrink-0 select-none">
         <div className="flex flex-col">
           {/* Brand Logo Header */}
@@ -359,78 +422,95 @@ export default function App() {
             <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/BYD_logo.svg/2560px-BYD_logo.svg.png" alt="BYD Logo" className="h-6 object-contain bg-white px-1.5 py-0.5 rounded-sm" />
             <div className="flex flex-col">
               <span className="text-xs font-black uppercase tracking-wider text-white">BYD YMS</span>
-              <span className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">Enterprise Command</span>
+              <span className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">
+                {userRole === 'Carrier' ? t('carrierPortalTitle', lang) : t('enterpriseYms', lang)}
+              </span>
             </div>
           </div>
 
           {/* Navigation Links */}
           <nav className="p-4 space-y-1">
-            <button
-              onClick={() => { setActiveView('coordinator'); setActiveTab('dashboard'); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
-                activeView === 'coordinator' && activeTab === 'dashboard' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
-              )}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Dashboard & Analytics
-            </button>
-
-            <button
-              onClick={() => { setActiveView('coordinator'); setActiveTab('kanban'); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
-                activeView === 'coordinator' && activeTab === 'kanban' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
-              )}
-            >
-              <Kanban className="w-4 h-4" />
-              Yard Management (Kanban)
-            </button>
-
-            <button
-              onClick={() => { setActiveView('coordinator'); setActiveTab('loading'); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
-                activeView === 'coordinator' && activeTab === 'loading' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
-              )}
-            >
-              <Zap className="w-4 h-4" />
-              Loading Panel (Table & KPIs)
-            </button>
-
-            <button
-              onClick={() => { setActiveView('coordinator'); setActiveTab('masterPlan'); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
-                activeView === 'coordinator' && activeTab === 'masterPlan' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
-              )}
-            >
-              <Calendar className="w-4 h-4" />
-              Master Plan & Schedule
-            </button>
-
-            <button
-              onClick={() => { setActiveView('coordinator'); setActiveTab('report'); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
-                activeView === 'coordinator' && activeTab === 'report' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
-              )}
-            >
-              <FileText className="w-4 h-4" />
-              Audit Report (Finished)
-            </button>
-
             {userRole === 'Admin' && (
-              <button
-                onClick={() => setActiveView('carrier')}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border-t border-slate-800 mt-4 pt-4",
-                  activeView === 'carrier' ? "bg-purple-600 text-white shadow-sm" : "hover:bg-slate-800 text-purple-400 hover:text-purple-300"
-                )}
-              >
-                <Truck className="w-4 h-4" />
-                Carrier Portal View
-              </button>
+              <>
+                <button
+                  onClick={() => { setActiveView('coordinator'); setActiveTab('dashboard'); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
+                    activeView === 'coordinator' && activeTab === 'dashboard' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
+                  )}
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  {t('dashboard', lang)}
+                </button>
+
+                <button
+                  onClick={() => { setActiveView('coordinator'); setActiveTab('kanban'); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
+                    activeView === 'coordinator' && activeTab === 'kanban' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
+                  )}
+                >
+                  <Kanban className="w-4 h-4" />
+                  {t('kanban', lang)}
+                </button>
+
+                <button
+                  onClick={() => { setActiveView('coordinator'); setActiveTab('loading'); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
+                    activeView === 'coordinator' && activeTab === 'loading' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
+                  )}
+                >
+                  <Zap className="w-4 h-4" />
+                  {t('loading', lang)}
+                </button>
+
+                <button
+                  onClick={() => { setActiveView('coordinator'); setActiveTab('masterPlan'); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
+                    activeView === 'coordinator' && activeTab === 'masterPlan' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
+                  )}
+                >
+                  <Calendar className="w-4 h-4" />
+                  {t('masterPlan', lang)}
+                </button>
+
+                <button
+                  onClick={() => { setActiveView('coordinator'); setActiveTab('report'); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors",
+                    activeView === 'coordinator' && activeTab === 'report' ? "bg-blue-600 text-white shadow-sm" : "hover:bg-slate-800 text-slate-400 hover:text-white"
+                  )}
+                >
+                  <FileText className="w-4 h-4" />
+                  {t('report', lang)}
+                </button>
+
+                <button
+                  onClick={() => setActiveView(activeView === 'coordinator' ? 'carrier' : 'coordinator')}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border-t border-slate-800 mt-4 pt-4",
+                    activeView === 'carrier' ? "bg-purple-600 text-white shadow-sm" : "hover:bg-slate-800 text-purple-400 hover:text-purple-300"
+                  )}
+                >
+                  <Truck className="w-4 h-4" />
+                  {activeView === 'coordinator' ? t('switchToCarrier', lang) : t('switchToCoordinator', lang)}
+                </button>
+              </>
+            )}
+
+            {userRole === 'Carrier' && (
+              <>
+                <div className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">{t('carrierMenu', lang)}</div>
+                <button
+                  onClick={() => setActiveView('carrier')}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider bg-purple-600 text-white shadow-sm"
+                >
+                  <Truck className="w-4 h-4" />
+                  {t('bookAndBookings', lang)}
+                </button>
+              </>
             )}
           </nav>
         </div>
@@ -438,12 +518,12 @@ export default function App() {
         {/* Sidebar Footer User Info */}
         <div className="p-4 border-t border-slate-800 bg-slate-950/30 flex items-center justify-between">
           <div className="flex flex-col truncate">
-            <span className="text-xs font-bold text-white truncate">{userDetails?.razaoSocial || userDetails?.email || 'Coordinator'}</span>
-            <span className="text-[10px] text-slate-400 uppercase tracking-widest">{userDetails?.role || 'Operator'}</span>
+            <span className="text-xs font-bold text-white truncate">{userDetails?.razaoSocial || userDetails?.email || 'User'}</span>
+            <span className="text-[10px] text-slate-400 uppercase tracking-widest">{userRole}</span>
           </div>
           <button 
             onClick={handleLogout}
-            title="Log Out"
+            title={t('logOut', lang)}
             className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition-colors"
           >
             <LogOut className="w-4 h-4" />
@@ -457,14 +537,24 @@ export default function App() {
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-bold uppercase tracking-wider text-slate-800">
-              {activeView === 'carrier' ? 'Carrier Booking Portal' : `Enterprise YMS > ${activeTab.toUpperCase()}`}
+              {activeView === 'carrier' ? t('carrierPortalTitle', lang) : `${t('enterpriseYms', lang)} > ${activeTab.toUpperCase()}`}
             </h1>
             <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-200 uppercase tracking-widest">
-              Live Production
+              {t('liveProduction', lang)}
             </span>
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Language Toggle Button */}
+            <button
+              onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors shadow-sm"
+              title="Switch Language / 切换语言"
+            >
+              <span>🌐</span>
+              <span>{lang === 'en' ? '中文 (简体)' : 'English'}</span>
+            </button>
+
             {/* Prominent Digital Clock */}
             <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -478,18 +568,18 @@ export default function App() {
 
             <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
               <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-xs shadow-sm">
-                {(userDetails?.email || 'C')[0].toUpperCase()}
+                {(userDetails?.email || userRole || 'C')[0].toUpperCase()}
               </div>
               <div className="hidden lg:flex flex-col">
-                <span className="text-xs font-bold text-slate-800 leading-none">{userDetails?.role || 'Coordinator'}</span>
-                <span className="text-[10px] text-slate-500 mt-0.5">BYD Operations</span>
+                <span className="text-xs font-bold text-slate-800 leading-none">{userRole}</span>
+                <span className="text-[10px] text-slate-500 mt-0.5">{userDetails?.razaoSocial || 'BYD Operations'}</span>
               </div>
             </div>
           </div>
         </header>
 
         {/* Main Canvas Area */}
-        {activeView === 'coordinator' ? (
+        {userRole === 'Admin' && activeView === 'coordinator' ? (
           <InternalDashboard 
             appointments={filteredAppointments}
             masterPlan={filteredMasterPlan}
@@ -503,6 +593,7 @@ export default function App() {
             onRevertToYard={handleRevertBackward}
             onCallTruck={handleCallTruck}
             onGateIn={handleGateIn}
+            onArrivedAtLine={handleArrivedAtLine}
             onNoShow={handleNoShow}
             onCreateSpecialWindow={handleCreateSpecialWindow}
             activeTab={activeTab}
@@ -510,12 +601,18 @@ export default function App() {
             onPrevDay={handlePrevDay}
             onNextDay={handleNextDay}
             onToday={handleToday}
+            lang={lang}
+            onCloseDaySweep={handleCloseDaySweep}
           />
         ) : (
           <CarrierPortal 
             appointments={filteredAppointments}
-            carrierName={userDetails?.razaoSocial || userDetails?.email || 'Carrier'}
+            carrierName={userDetails?.razaoSocial || userDetails?.email || 'My Transport Co.'}
             onBookSlot={handleBookSlot}
+            onMarkEnRoute={handleMarkEnRoute}
+            onReschedule={handleReschedule}
+            onUpdateAppointment={handleUpdateAppointment}
+            lang={lang}
           />
         )}
       </div>

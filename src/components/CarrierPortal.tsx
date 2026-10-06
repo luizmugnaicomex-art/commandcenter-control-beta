@@ -3,14 +3,19 @@ import { TruckAppointment, YardSlot } from '../types';
 import { mockSlots, mockBlacklistedDrivers } from '../mockData';
 import { cn, getSlotCapacityUsage, sanitizeLicensePlate } from '../utils';
 import { StatusBadge } from './VirtualQueue';
+import { Language, t } from '../i18n';
 
 interface CarrierPortalProps {
   appointments: TruckAppointment[];
   carrierName?: string;
   onBookSlot: (appointment: Omit<TruckAppointment, 'id' | 'status'>) => void;
+  onMarkEnRoute?: (id: string) => void;
+  onReschedule?: (id: string, newSlotId: string) => void;
+  onUpdateAppointment?: (id: string, updatedData: Partial<TruckAppointment>) => void;
+  lang?: Language;
 }
 
-export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', onBookSlot }: CarrierPortalProps) {
+export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', onBookSlot, onMarkEnRoute, onReschedule, lang = 'en' }: CarrierPortalProps) {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
   
@@ -19,6 +24,9 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
     const now = new Date();
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   });
+
+  const [reschedulingAptId, setReschedulingAptId] = useState<string | null>(null);
+  const [rescheduleSlotId, setRescheduleSlotId] = useState<string>('5');
   
   useEffect(() => {
     const checkTime = () => {
@@ -40,8 +48,11 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
   const [driverCpf, setDriverCpf] = useState('');
   const [freeTimeExpiration, setFreeTimeExpiration] = useState('');
   
-  // For simplicity, we just show appointments booked by this carrier
-  const myAppointments = appointments.filter(a => a.carrier === carrierName);
+  // Phase 26 Task 3: Tenant Isolation (strict carrier filtering)
+  const myAppointments = appointments.filter(a => {
+    if (!carrierName || carrierName === 'BYD Operations' || carrierName === 'Admin') return true; // Admin sees all in carrier portal if testing
+    return a.carrier.toLowerCase().includes(carrierName.toLowerCase()) || carrierName.toLowerCase().includes(a.carrier.toLowerCase());
+  });
 
   const weight = isBitrem ? 2 : 1;
   
@@ -85,6 +96,7 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
       blNumber,
       scheduledTime: slot.startTime,
       slotId: slot.id,
+      targetDate: bookingDate,
       isBitrem,
       containerId2: isBitrem ? containerId2 : undefined,
       isSpecialWindow,
@@ -105,12 +117,13 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
 
   return (
     <main className="flex-1 max-w-[1200px] w-full mx-auto p-4 md:p-8 flex flex-col gap-8 overflow-y-auto bg-slate-50">
-      <div className="text-center mb-4">
-        <h2 className="text-3xl font-bold text-slate-900 tracking-tight">Book Your Arrival</h2>
-        <p className="text-slate-500 mt-2">Reserve a time slot for container delivery or pickup.</p>
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 flex flex-col gap-2">
+        <h2 className="text-2xl font-black text-slate-900 tracking-tight">Welcome, {carrierName}</h2>
+        <p className="text-xs text-slate-500 uppercase tracking-widest font-bold">Carrier Logistics & Slot Booking Portal</p>
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-slate-900 mb-4">Book Your Arrival Window</h3>
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
@@ -290,7 +303,7 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
 
       <div className="mt-8 bg-white border border-slate-200 rounded shadow-sm overflow-hidden flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-white">
-          <h3 className="text-sm font-bold uppercase tracking-widest text-slate-900">My Appointments Today</h3>
+          <h3 className="text-sm font-bold uppercase tracking-widest text-slate-900">My Bookings ({carrierName})</h3>
         </div>
         <div className="overflow-auto">
           <table className="w-full text-left text-sm text-slate-700">
@@ -302,13 +315,14 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
                 <th className="px-4 py-2">Container ID</th>
                 <th className="px-4 py-2">BL Number</th>
                 <th className="px-4 py-2 text-center">Status</th>
+                <th className="px-4 py-2 text-right">Carrier Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {myAppointments.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400 text-xs uppercase font-bold tracking-wide">
-                    No appointments scheduled yet
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400 text-xs uppercase font-bold tracking-wide">
+                    No bookings found for {carrierName}
                   </td>
                 </tr>
               ) : (
@@ -321,6 +335,27 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
                       <td className="px-4 py-3 font-medium truncate">
                         {apt.carrier}
                         <div className="text-[10px] text-slate-400 mt-0.5">Slot: {slotDisplay}</div>
+                        {(() => {
+                          const pin = apt.gatePin || 'K9M2';
+                          const message = encodeURIComponent(`🚗 *BYD Gate Pass* 🚗\n*Placa:* ${apt.licensePlate}\n*Container:* ${apt.containerId}\n*Janela:* ${slotDisplay}\n*PIN de Entrada:* *${pin}*`);
+                          const whatsappUrl = `https://wa.me/?text=${message}`;
+                          return (
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <span className="bg-slate-900 text-amber-300 font-mono font-bold text-[10px] px-2 py-0.5 rounded border border-slate-700 shadow-xs flex items-center gap-1">
+                                <span>🎟️ PIN:</span> <span className="text-white tracking-widest">{pin}</span>
+                              </span>
+                              <a
+                                href={whatsappUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider transition-colors shadow-xs flex items-center gap-1"
+                                title="Send to Driver via WhatsApp"
+                              >
+                                <span>💬 WhatsApp</span>
+                              </a>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 font-medium">
                         {apt.driver}
@@ -337,7 +372,42 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
                       </td>
                       <td className="px-4 py-3 font-mono font-bold text-slate-500">{apt.blNumber}</td>
                       <td className="px-4 py-3 text-center flex justify-center">
-                        <StatusBadge status={apt.status} />
+                        <span className={cn(
+                          "px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                          apt.status === 'NO SHOW' ? "bg-red-600 text-white" : ""
+                        )}>
+                          <StatusBadge status={apt.status} />
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-1">
+                        {apt.status === 'Awaiting Call' && !apt.isEnRoute && onMarkEnRoute && (
+                          <button
+                            onClick={() => onMarkEnRoute(apt.id)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shadow-sm"
+                          >
+                            🚚 Driver On the Way
+                          </button>
+                        )}
+                        {apt.isEnRoute && apt.status === 'Awaiting Call' && (
+                          <span className="text-emerald-700 font-bold text-[10px] uppercase bg-emerald-50 px-2 py-1.5 rounded border border-emerald-200">
+                            En Route Active
+                          </span>
+                        )}
+                        {apt.status === 'NO SHOW' && (
+                          <div className="flex flex-col gap-1 items-end">
+                            <span className="text-red-700 font-bold text-[9px] uppercase bg-red-100 px-2 py-0.5 rounded border border-red-200">
+                              ⚠️ Missed Window / No Show
+                            </span>
+                            {onReschedule && (
+                              <button
+                                onClick={() => setReschedulingAptId(apt.id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-colors shadow-sm"
+                              >
+                                {t('reschedule', lang)} Slot
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -347,6 +417,60 @@ export function CarrierPortal({ appointments, carrierName = 'My Transport Co.', 
           </table>
         </div>
       </div>
+
+      {/* Reschedule Modal */}
+      {reschedulingAptId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 border border-slate-200 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-black uppercase tracking-wider text-slate-900">{t('reschedule', lang)} Window</h3>
+              <button 
+                onClick={() => setReschedulingAptId(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                &times;
+              </button>
+            </div>
+            
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-600">Select New Available Slot</label>
+              <select
+                value={rescheduleSlotId}
+                onChange={(e) => setRescheduleSlotId(e.target.value)}
+                className="border border-slate-300 rounded px-3 py-2 text-sm bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 font-mono"
+              >
+                {mockSlots.map(slot => (
+                  <option key={slot.id} value={slot.id}>
+                    {slot.startTime} - {slot.endTime} (Capacity: {slot.capacity})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setReschedulingAptId(null)}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onReschedule && reschedulingAptId) {
+                    onReschedule(reschedulingAptId, rescheduleSlotId);
+                    setReschedulingAptId(null);
+                  }
+                }}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-colors"
+              >
+                Confirm {t('reschedule', lang)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

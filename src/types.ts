@@ -1,4 +1,4 @@
-export type TruckStatus = 'Awaiting Call' | 'Called/In Transit' | 'In Yard' | 'Operated';
+export type TruckStatus = 'Awaiting Call' | 'Called/In Transit' | 'Physical Line' | 'In Yard' | 'Operated' | 'NO SHOW';
 
 export const YARD_ZONES = ['Warehouse A', 'Warehouse B', 'Dock 1', 'Dock 2'] as const;
 export type YardZone = typeof YARD_ZONES[number];
@@ -24,6 +24,8 @@ export interface TruckAppointment {
   noShowCount?: number;
   isSpecialWindow?: boolean;
   freeTimeExpiration?: string;
+  isEnRoute?: boolean;
+  gatePin?: string;
 }
 
 

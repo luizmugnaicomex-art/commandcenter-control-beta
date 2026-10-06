@@ -7,7 +7,7 @@ import { ContainerCard } from './ContainerCard';
 import { DailyReport } from './DailyReport';
 import { MasterPlanReconciliation } from './MasterPlanReconciliation';
 import { LoadingPanel } from './LoadingPanel';
-import { cn, sanitizeLicensePlate } from '../utils';
+import { cn, sanitizeLicensePlate, getPunctualityStatus } from '../utils';
 import { mockBlacklistedDrivers } from '../mockData';
 import { ShieldAlert, Zap, Truck, ClipboardList, BarChart3, LayoutDashboard } from 'lucide-react';
 
@@ -24,6 +24,7 @@ interface InternalDashboardProps {
   onRevertToYard: (id: string) => void;
   onCallTruck: (id: string) => void;
   onGateIn: (id: string) => void;
+  onArrivedAtLine: (id: string) => void;
   onNoShow: (id: string) => void;
   onCreateSpecialWindow: (data: Omit<TruckAppointment, 'id' | 'status'>) => void;
   activeTab: 'dashboard' | 'kanban' | 'loading' | 'masterPlan' | 'report';
@@ -31,9 +32,10 @@ interface InternalDashboardProps {
   onPrevDay: () => void;
   onNextDay: () => void;
   onToday: () => void;
+  onCloseDaySweep?: () => void;
 }
 
-export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onNoShow, onCreateSpecialWindow, activeTab, selectedDate, onPrevDay, onNextDay, onToday }: InternalDashboardProps) {
+export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onArrivedAtLine, onNoShow, onCreateSpecialWindow, activeTab, selectedDate, onPrevDay, onNextDay, onToday, onCloseDaySweep }: InternalDashboardProps) {
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
   const [isBlacklistModalOpen, setIsBlacklistModalOpen] = useState(false);
   
@@ -43,6 +45,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
   const [swDriver, setSwDriver] = useState('');
   const [swContainerId, setSwContainerId] = useState('');
   const [swBlNumber, setSwBlNumber] = useState('');
+  const [fastTrackPin, setFastTrackPin] = useState('');
 
   const handleSpecialSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -68,7 +71,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
   const currentSlotAppointments = appointments.filter(a => a.slotId === currentSlot.id);
   const inYardCount = appointments.filter(a => a.status === 'In Yard').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
   const operatedCount = currentSlotAppointments.filter(a => a.status === 'Operated').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
-  const awaitingCount = currentSlotAppointments.filter(a => a.status === 'Awaiting Call' || a.status === 'Called/In Transit').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
+  const awaitingCount = currentSlotAppointments.filter(a => a.status === 'Awaiting Call' || a.status === 'Called/In Transit' || a.status === 'Physical Line').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
 
   const [isTimeToCall, setIsTimeToCall] = useState(false);
   
@@ -99,9 +102,23 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
     return () => clearInterval(interval);
   }, [currentSlot, inYardCount]);
 
+  const getPunctualityRank = (scheduledTime?: string) => {
+    const p = getPunctualityStatus(scheduledTime);
+    if (p.status === 'LATE') return 0;
+    if (p.status === 'ON TIME') return 1;
+    return 2; // EARLY
+  };
+
   const queueAppointments = appointments
-    .filter(a => a.status === 'Awaiting Call')
-    .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
+    .filter(a => a.status === 'Awaiting Call' || a.status === 'NO SHOW')
+    .sort((a, b) => {
+      if (a.isEnRoute && !b.isEnRoute) return -1;
+      if (!a.isEnRoute && b.isEnRoute) return 1;
+      const rankA = getPunctualityRank(a.scheduledTime);
+      const rankB = getPunctualityRank(b.scheduledTime);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.scheduledTime.localeCompare(b.scheduledTime);
+    });
 
   let totalTurnaroundMins = 0;
   let completedCount = 0;
@@ -119,7 +136,21 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
 
   const transitAppointments = appointments
     .filter(a => a.status === 'Called/In Transit')
-    .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
+    .sort((a, b) => {
+      const rankA = getPunctualityRank(a.scheduledTime);
+      const rankB = getPunctualityRank(b.scheduledTime);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.scheduledTime.localeCompare(b.scheduledTime);
+    });
+
+  const physicalLineAppointments = appointments
+    .filter(a => a.status === 'Physical Line')
+    .sort((a, b) => {
+      const rankA = getPunctualityRank(a.scheduledTime);
+      const rankB = getPunctualityRank(b.scheduledTime);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.scheduledTime.localeCompare(b.scheduledTime);
+    });
 
   const inYardAppointments = appointments
     .filter(a => a.status === 'In Yard')
@@ -157,6 +188,16 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
         </section>
 
         <div className="flex items-center gap-3 shrink-0 self-stretch md:self-auto justify-end">
+          {onCloseDaySweep && (
+            <button
+              onClick={onCloseDaySweep}
+              className="bg-red-600 hover:bg-red-700 text-white px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-1.5"
+              title="End of Shift / Midnight Sweep"
+            >
+              <span>🌙 Close Day Sweep</span>
+            </button>
+          )}
+
           <button
             onClick={() => setIsBlacklistModalOpen(true)}
             className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2"
@@ -199,7 +240,16 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
           </div>
         </section>
       ) : activeTab === 'masterPlan' ? (
-        <MasterPlanReconciliation appointments={appointments} masterPlan={masterPlan} onUploadMasterPlan={onUploadMasterPlan} onUpdateMasterPlanItem={onUpdateMasterPlanItem} />
+        <MasterPlanReconciliation 
+          appointments={appointments} 
+          masterPlan={masterPlan} 
+          onUploadMasterPlan={onUploadMasterPlan} 
+          onUpdateMasterPlanItem={onUpdateMasterPlanItem} 
+          selectedDate={selectedDate}
+          onPrevDay={onPrevDay}
+          onNextDay={onNextDay}
+          onToday={onToday}
+        />
       ) : activeTab === 'report' ? (
         <DailyReport appointments={appointments} />
       ) : activeTab === 'loading' ? (
@@ -215,8 +265,50 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
           onToday={onToday}
         />
       ) : (
-        /* Kanban Board (Gestão de Pátio) with Date Navigation Bar */
+        /* Kanban Board (Gestão de Pátio) with 5 Columns & Date Navigation Bar */
         <div className="flex-1 flex flex-col gap-3 min-h-0">
+          {/* Phase 29 Task 3: Fast-Track Gate Pass Scanner Bar */}
+          <div className="bg-gradient-to-r from-blue-900 to-slate-900 rounded-lg p-3 shadow-md flex items-center justify-between gap-4 shrink-0">
+            <div className="flex items-center gap-2 text-white">
+              <span className="text-lg">🔍</span>
+              <div className="flex flex-col">
+                <span className="text-xs font-black uppercase tracking-wider">Fast-Track Gate Pass Scanner</span>
+                <span className="text-[10px] text-slate-300">Scan QR or Type 4-Digit PIN to Gate-In instantly</span>
+              </div>
+            </div>
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cleanPin = fastTrackPin.trim().toUpperCase();
+                if (!cleanPin) return;
+                const foundApt = appointments.find(a => a.gatePin?.toUpperCase() === cleanPin);
+                if (foundApt) {
+                  onGateIn(foundApt.id);
+                  alert(`✅ Fast-Track Success! Truck [${foundApt.licensePlate}] / Container [${foundApt.containerId}] successfully Gated-In.`);
+                  setFastTrackPin('');
+                } else {
+                  alert(`❌ Gate PIN "${cleanPin}" not found among active bookings.`);
+                }
+              }}
+              className="flex items-center gap-2 flex-1 max-w-md"
+            >
+              <input
+                type="text"
+                value={fastTrackPin}
+                onChange={(e) => setFastTrackPin(e.target.value)}
+                placeholder="Scan QR or Type 4-Digit PIN (e.g. K9M2)..."
+                maxLength={6}
+                className="w-full bg-white text-slate-900 font-mono font-bold text-sm px-3 py-2 rounded border border-slate-300 uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
+              />
+              <button
+                type="submit"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider px-4 py-2 rounded shadow transition-colors shrink-0"
+              >
+                Gate-In ⚡
+              </button>
+            </form>
+          </div>
+
           {/* Task 1: Date Navigation Bar */}
           <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-2.5 shadow-sm shrink-0">
             <div className="flex items-center gap-2">
@@ -249,11 +341,11 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             </div>
           </div>
 
-          <section className="flex-1 flex flex-col xl:flex-row gap-3 min-h-0 flex-1">
+          <section className="flex-1 flex flex-col xl:flex-row gap-2.5 min-h-0 flex-1">
             {/* Column 1: Queue */}
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-amber-500 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
-                <h3 className="text-xs uppercase tracking-widest">Queue (Awaiting)</h3>
+                <h3 className="text-xs uppercase tracking-widest">Queue</h3>
                 <span className="bg-amber-600 text-white px-2 py-0.5 rounded-full text-xs font-mono">
                   {queueAppointments.length}
                 </span>
@@ -275,12 +367,27 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
               </div>
               <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
                 {transitAppointments.map(apt => (
+                  <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onArrivedAtLine={onArrivedAtLine} onNoShow={onNoShow} onRevertToYard={onRevertToYard} />
+                ))}
+              </div>
+            </div>
+
+            {/* Column 3: Physical Line (Fila Externa) */}
+            <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
+              <div className="p-3 bg-orange-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
+                <h3 className="text-xs uppercase tracking-widest">Physical Line</h3>
+                <span className="bg-orange-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                  {physicalLineAppointments.length}
+                </span>
+              </div>
+              <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
+                {physicalLineAppointments.map(apt => (
                   <ContainerCard key={apt.id} appointment={apt} appointments={appointments} onGateIn={onGateIn} onNoShow={onNoShow} onRevertToYard={onRevertToYard} />
                 ))}
               </div>
             </div>
 
-            {/* Column 3: Active Yard */}
+            {/* Column 4: Active Yard */}
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-blue-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">Active Yard</h3>
@@ -303,7 +410,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
               </div>
             </div>
 
-            {/* Column 4: Finished */}
+            {/* Column 5: Finished */}
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-purple-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">Finished</h3>
