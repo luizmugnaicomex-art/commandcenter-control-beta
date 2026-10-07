@@ -13,7 +13,7 @@ import { MobileClerkApp } from './components/MobileClerkApp';
 import { Login, UserRole, UserDetails } from './components/Login';
 import { Language, t } from './i18n';
 import { cn } from './utils';
-import { collection, query, onSnapshot, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc, writeBatch, where, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 import { LayoutDashboard, Kanban, Zap, Calendar, FileText, Bell, LogOut, Truck } from 'lucide-react';
 
@@ -78,7 +78,13 @@ export default function App() {
   useEffect(() => {
     if (!userRole) return;
     
-    const q = query(collection(db, 'appointments'));
+    let q;
+    if (userRole === 'Carrier' && userDetails?.uid) {
+      q = query(collection(db, 'appointments'), where('carrierId', '==', userDetails.uid));
+    } else {
+      q = query(collection(db, 'appointments'));
+    }
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const apts: TruckAppointment[] = [];
       snapshot.forEach((doc) => {
@@ -90,7 +96,7 @@ export default function App() {
     });
     
     return () => unsubscribe();
-  }, [userRole]);
+  }, [userRole, userDetails?.uid]);
 
   // Sync masterPlan from Firestore
   useEffect(() => {
@@ -204,7 +210,7 @@ export default function App() {
       status: 'Awaiting Call',
       targetDate: selectedDate,
       gatePin: newAppointmentData.gatePin || generateGatePin(),
-      carrierUid: userDetails?.uid || '',
+      carrierId: userDetails?.uid || '',
       createdAt: new Date().toISOString()
     };
     try {
@@ -223,7 +229,7 @@ export default function App() {
       targetDate: selectedDate,
       isSpecialWindow: true,
       gatePin: newAppointmentData.gatePin || generateGatePin(),
-      carrierUid: userDetails?.uid || '',
+      carrierId: userDetails?.uid || '',
       createdAt: new Date().toISOString()
     };
     try {
@@ -239,6 +245,141 @@ export default function App() {
       await updateDoc(aptRef, cleanForFirestore({ entryGate, unloadingLocation }));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `appointments/${id}`);
+    }
+  };
+
+  const handleScheduleBacklog = async (item: MasterPlanItem) => {
+    try {
+      const slot = mockSlots[0];
+      const appointmentId = `t${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const batch = writeBatch(db);
+
+      const newAppointment = {
+        carrier: item.carrierName || 'BYD Operations',
+        driver: 'Assigned Driver',
+        licensePlate: `BYD-${Math.floor(Math.random() * 9000 + 1000)}`,
+        containerId: item.containerId,
+        blNumber: item.blNumber,
+        scheduledTime: slot.startTime,
+        slotId: slot.id,
+        unloadingLocation: item.deliverySite || 'Warehouse A',
+        targetDate: selectedDate,
+        status: 'Awaiting Call',
+        gatePin: generateGatePin(),
+        carrierId: userDetails?.uid || '',
+        createdAt: new Date().toISOString()
+      };
+
+      const aptRef = doc(db, 'appointments', appointmentId);
+      batch.set(aptRef, cleanForFirestore(newAppointment));
+
+      const planRef = doc(db, 'masterPlan', item.id);
+      batch.update(planRef, cleanForFirestore({ status: 'MATCHED', excelStatus: 'SCHEDULED' }));
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `appointments/masterPlan`);
+    }
+  };
+
+  const handleAutoSchedulePending = async () => {
+    try {
+      const pendingItems = masterPlan.filter(item => 
+        item.targetDate === selectedDate && 
+        !appointments.some(a => a.containerId === item.containerId || a.blNumber === item.blNumber)
+      );
+
+      if (pendingItems.length === 0) {
+        alert('No missing bookings found to auto-schedule for this date.');
+        return;
+      }
+
+      const batch = writeBatch(db);
+      let scheduledCount = 0;
+
+      pendingItems.forEach((item, index) => {
+        const slot = mockSlots[index % mockSlots.length];
+        const appointmentId = `t${Date.now()}_${index}_${Math.random().toString(36).substring(2, 6)}`;
+        
+        const newAppointment = {
+          carrier: item.carrierName || 'BYD Operations',
+          driver: 'Assigned Driver',
+          licensePlate: `BYD-${Math.floor(Math.random() * 9000 + 1000)}`,
+          containerId: item.containerId,
+          blNumber: item.blNumber,
+          scheduledTime: slot.startTime,
+          slotId: slot.id,
+          unloadingLocation: item.deliverySite || 'Warehouse A',
+          targetDate: selectedDate,
+          status: 'Awaiting Call',
+          gatePin: generateGatePin(),
+          carrierId: userDetails?.uid || '',
+          createdAt: new Date().toISOString()
+        };
+
+        const aptRef = doc(db, 'appointments', appointmentId);
+        batch.set(aptRef, cleanForFirestore(newAppointment));
+
+        const planRef = doc(db, 'masterPlan', item.id);
+        batch.update(planRef, cleanForFirestore({ status: 'MATCHED', excelStatus: 'AUTO-SCHEDULED' }));
+        scheduledCount++;
+      });
+
+      await batch.commit();
+      alert(`⚡ Successfully auto-scheduled ${scheduledCount} missing booking(s) into available yard slots!`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'appointments/masterPlan');
+    }
+  };
+
+  const handleFactoryReset = async () => {
+    // 1. Double Confirmation
+    const isSure = window.confirm("⚠️ DANGER: Are you absolutely sure you want to WIPE ALL system data? This will delete all appointments and master plan records from Firestore. This CANNOT be undone.");
+    if (!isSure) return;
+    
+    const isDoubleSure = window.confirm("Please confirm one more time to execute the HARD RESET.");
+    if (!isDoubleSure) return;
+
+    try {
+      let deletedCount = 0;
+      let batch = writeBatch(db);
+      let opCount = 0;
+
+      // 2. Fetch and delete all appointments from Firestore
+      const aptSnapshot = await getDocs(collection(db, 'appointments'));
+      for (const d of aptSnapshot.docs) {
+        batch.delete(d.ref);
+        opCount++;
+        deletedCount++;
+        if (opCount >= 400) {
+          await batch.commit();
+          batch = writeBatch(db);
+          opCount = 0;
+        }
+      }
+
+      // 3. Fetch and delete all masterPlan items from Firestore
+      const planSnapshot = await getDocs(collection(db, 'masterPlan'));
+      for (const d of planSnapshot.docs) {
+        batch.delete(d.ref);
+        opCount++;
+        deletedCount++;
+        if (opCount >= 400) {
+          await batch.commit();
+          batch = writeBatch(db);
+          opCount = 0;
+        }
+      }
+
+      if (opCount > 0) {
+        await batch.commit();
+      }
+
+      alert(`✅ System Reset Successful. Deleted ${deletedCount} records from Firestore.`);
+      window.location.reload();
+    } catch (error) {
+      console.error("Reset failed: ", error);
+      alert("Error wiping data: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -603,6 +744,10 @@ export default function App() {
             onToday={handleToday}
             lang={lang}
             onCloseDaySweep={handleCloseDaySweep}
+            onAutoSchedulePending={handleAutoSchedulePending}
+            onScheduleBacklog={handleScheduleBacklog}
+            onFactoryReset={handleFactoryReset}
+            userRole={userRole}
           />
         ) : (
           <CarrierPortal 

@@ -34,33 +34,18 @@ export const mockAppointments: TruckAppointment[] = [
 ];
 
 export const mockSlots: YardSlot[] = [
-  // Bloco 0: Madrugada / Início da manhã
-  { id: '0', startTime: '06:00', endTime: '07:00', capacity: 30, status: 'Completed' },
-  // Bloco 1: Manhã
-  { id: '1', startTime: '07:00', endTime: '08:00', capacity: 30, status: 'Completed' },
-  // 08:00 - 08:15: PAUSA (Chegada de funcionários)
-
-  // Bloco 2: Meio do dia
-  { id: '2', startTime: '08:15', endTime: '09:15', capacity: 30, status: 'Completed' },
-  { id: '3', startTime: '09:15', endTime: '10:15', capacity: 30, status: 'Completed' },
-  { id: '4', startTime: '10:15', endTime: '11:00', capacity: 22, status: 'Active' }, // 45 min = 22 vagas
-  // 11:00 - 12:40: PAUSA (Almoço)
-
-  // Bloco 3: Tarde
-  { id: '5', startTime: '12:40', endTime: '13:40', capacity: 30, status: 'Upcoming' },
-  { id: '6', startTime: '13:40', endTime: '14:40', capacity: 30, status: 'Upcoming' },
-  { id: '7', startTime: '14:40', endTime: '15:00', capacity: 10, status: 'Upcoming' }, // 20 min = 10 vagas
-  // 15:00 - 16:15: PAUSA (Troca de turno / Ônibus)
-
-  // Bloco 4: Final da tarde / Noite
-  { id: '8', startTime: '16:15', endTime: '17:15', capacity: 30, status: 'Upcoming' },
-  { id: '9', startTime: '17:15', endTime: '18:15', capacity: 30, status: 'Upcoming' },
-  { id: '10', startTime: '18:15', endTime: '19:15', capacity: 30, status: 'Upcoming' },
-  { id: '11', startTime: '19:15', endTime: '20:00', capacity: 22, status: 'Upcoming' }, // 45 min = 22 vagas
-  // 20:00 - 21:00: PAUSA (Jantar)
-
-  // Bloco 5: Fim do expediente
-  { id: '12', startTime: '21:00', endTime: '22:00', capacity: 30, status: 'Upcoming' },
-  { id: '13', startTime: '22:00', endTime: '22:40', capacity: 20, status: 'Upcoming' }  // 40 min = 20 vagas
-  // 22:40: FIM DO TURNO
+  { id: '0', startTime: '06:00', endTime: '07:00', capacity: 28, status: 'Completed' },
+  { id: '1', startTime: '07:00', endTime: '08:00', capacity: 28, status: 'Completed' },
+  { id: '2', startTime: '08:15', endTime: '09:15', capacity: 28, status: 'Completed' },
+  { id: '3', startTime: '09:15', endTime: '10:15', capacity: 28, status: 'Completed' },
+  { id: '4', startTime: '10:15', endTime: '11:00', capacity: 21, status: 'Active' },
+  { id: '5', startTime: '12:40', endTime: '13:40', capacity: 28, status: 'Upcoming' },
+  { id: '6', startTime: '13:40', endTime: '14:40', capacity: 28, status: 'Upcoming' },
+  { id: '7', startTime: '14:40', endTime: '15:00', capacity: 9, status: 'Upcoming' },
+  { id: '8', startTime: '16:15', endTime: '17:15', capacity: 28, status: 'Upcoming' },
+  { id: '9', startTime: '17:15', endTime: '18:15', capacity: 28, status: 'Upcoming' },
+  { id: '10', startTime: '18:15', endTime: '19:15', capacity: 28, status: 'Upcoming' },
+  { id: '11', startTime: '19:15', endTime: '20:00', capacity: 21, status: 'Upcoming' },
+  { id: '12', startTime: '21:00', endTime: '22:00', capacity: 28, status: 'Upcoming' },
+  { id: '13', startTime: '22:00', endTime: '22:40', capacity: 19, status: 'Upcoming' }
 ];

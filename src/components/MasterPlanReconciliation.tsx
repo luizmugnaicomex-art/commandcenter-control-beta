@@ -1,7 +1,8 @@
 import React, { useState, DragEvent, ChangeEvent } from 'react';
 import { TruckAppointment, MasterPlanItem } from '../types';
 import { cn } from '../utils';
-import { AlertCircle, CheckCircle2, AlertTriangle, Send, Upload, FileSpreadsheet, Loader2, Check, Calendar, Search } from 'lucide-react';
+import { mockSlots } from '../mockData';
+import { AlertCircle, CheckCircle2, AlertTriangle, Send, Upload, FileSpreadsheet, Loader2, Check, Calendar, Search, Zap } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface MasterPlanReconciliationProps {
@@ -9,15 +10,20 @@ interface MasterPlanReconciliationProps {
   masterPlan: MasterPlanItem[];
   onUploadMasterPlan: (items: MasterPlanItem[]) => void;
   onUpdateMasterPlanItem: (item: MasterPlanItem) => void;
+  onBookSlot?: (appointment: Omit<TruckAppointment, 'id' | 'status'>) => void;
+  onAutoSchedulePending?: () => Promise<void> | void;
+  onScheduleBacklog?: (item: MasterPlanItem) => Promise<void> | void;
   selectedDate: string;
   onPrevDay: () => void;
   onNextDay: () => void;
   onToday: () => void;
 }
 
-export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> = ({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, selectedDate, onPrevDay, onNextDay, onToday }) => {
+export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> = ({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, onBookSlot, onAutoSchedulePending, onScheduleBacklog, selectedDate, onPrevDay, onNextDay, onToday }) => {
   const [alertedCarriers, setAlertedCarriers] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isAutoScheduling, setIsAutoScheduling] = useState(false);
+  const [schedulingId, setSchedulingId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [containerSearch, setContainerSearch] = useState('');
@@ -32,24 +38,123 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
     showToast(`📢 Webhook alert successfully sent to carrier "${carrierName}" regarding missing booking for container ${containerId}. Reminder dispatched via WhatsApp & Email.`);
   };
 
-  const handleMoveToNextDay = (item: MasterPlanItem) => {
-    const currentDemurrage = new Date(item.demurrageDate || Date.now());
-    currentDemurrage.setDate(currentDemurrage.getDate() + 1);
-    const newDemurrageStr = currentDemurrage.toISOString().split('T')[0];
+  const handleScheduleBacklogItem = async (item: MasterPlanItem) => {
+    if (onScheduleBacklog) {
+      setSchedulingId(item.id);
+      try {
+        await onScheduleBacklog(item);
+      } finally {
+        setSchedulingId(null);
+      }
+      return;
+    }
 
-    const currentTarget = new Date(item.targetDate || selectedDate);
-    currentTarget.setDate(currentTarget.getDate() + 1);
-    const newTargetStr = currentTarget.toISOString().split('T')[0];
+    if (!onBookSlot) {
+      showToast('Booking function not available.');
+      return;
+    }
 
-    const updated: MasterPlanItem = {
+    const slot = mockSlots[0];
+    onBookSlot({
+      carrier: item.carrierName || 'BYD Operations',
+      driver: 'Assigned Driver',
+      licensePlate: `BYD-${Math.floor(Math.random() * 9000 + 1000)}`,
+      containerId: item.containerId,
+      blNumber: item.blNumber,
+      scheduledTime: slot.startTime,
+      slotId: slot.id,
+      unloadingLocation: item.deliverySite || 'Warehouse A',
+      targetDate: selectedDate,
+      gatePin: Math.random().toString(36).substring(2, 6).toUpperCase()
+    });
+
+    onUpdateMasterPlanItem({
       ...item,
-      targetDate: newTargetStr,
-      demurrageDate: newDemurrageStr,
-      excelStatus: 'POSTPONED / BACKLOG'
-    };
+      status: 'MATCHED',
+      excelStatus: 'SCHEDULED'
+    });
 
-    onUpdateMasterPlanItem(updated);
-    showToast(`📅 Container ${item.containerId} successfully rescheduled to next day (${newTargetStr}) due to backlog.`);
+    showToast(`⚡ Container ${item.containerId} successfully scheduled into slot ${slot.startTime} - ${slot.endTime} for ${selectedDate}!`);
+  };
+
+  const handleBulkAlertCarriers = () => {
+    let count = 0;
+    const newAlerts = { ...alertedCarriers };
+    filteredMasterPlan.forEach(item => {
+      const hasBooking = appointments.some(a => a.containerId === item.containerId || a.blNumber === item.blNumber);
+      if (!hasBooking && !newAlerts[item.containerId]) {
+        newAlerts[item.containerId] = true;
+        count++;
+      }
+    });
+    setAlertedCarriers(newAlerts);
+    showToast(`📢 Bulk Alert Dispatched: Successfully alerted ${count} carrier(s) with missing bookings via WhatsApp & Email webhooks.`);
+  };
+
+  const handleBulkRescheduleBacklog = () => {
+    let count = 0;
+    filteredMasterPlan.forEach(item => {
+      const hasBooking = appointments.some(a => a.containerId === item.containerId || a.blNumber === item.blNumber);
+      if (!hasBooking) {
+        onUpdateMasterPlanItem({
+          ...item,
+          targetDate: selectedDate,
+          excelStatus: 'RESCHEDULED BACKLOG'
+        });
+        count++;
+      }
+    });
+    showToast(`📅 Successfully rescheduled ${count} backlog container(s) to today (${selectedDate})!`);
+  };
+
+  const handleAutoSchedulePending = async () => {
+    if (onAutoSchedulePending) {
+      setIsAutoScheduling(true);
+      try {
+        await onAutoSchedulePending();
+      } finally {
+        setIsAutoScheduling(false);
+      }
+      return;
+    }
+
+    if (!onBookSlot) return;
+    const unbookedItems = filteredMasterPlan.filter(item => {
+      return !appointments.some(a => a.containerId === item.containerId || a.blNumber === item.blNumber);
+    });
+
+    if (unbookedItems.length === 0) {
+      showToast('No missing bookings found to auto-schedule for this date.');
+      return;
+    }
+
+    let scheduledCount = 0;
+    unbookedItems.forEach((item, index) => {
+      const slotIndex = index % mockSlots.length;
+      const slot = mockSlots[slotIndex];
+      
+      onBookSlot({
+        carrier: item.carrierName || 'BYD Operations',
+        driver: 'Assigned Driver',
+        licensePlate: `BYD-${Math.floor(Math.random() * 9000 + 1000)}`,
+        containerId: item.containerId,
+        blNumber: item.blNumber,
+        scheduledTime: slot.startTime,
+        slotId: slot.id,
+        unloadingLocation: item.deliverySite || 'Warehouse A',
+        targetDate: selectedDate,
+        gatePin: Math.random().toString(36).substring(2, 6).toUpperCase()
+      });
+
+      onUpdateMasterPlanItem({
+        ...item,
+        status: 'MATCHED',
+        excelStatus: 'AUTO-SCHEDULED'
+      });
+      scheduledCount++;
+    });
+
+    showToast(`⚡ Successfully auto-scheduled ${scheduledCount} missing booking(s) into available yard slots!`);
   };
 
   const processWorkbookData = (data: any[]) => {
@@ -239,6 +344,36 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
         </div>
       </div>
 
+      {/* Bulk Action Bar */}
+      <div className="bg-white border border-slate-200 rounded-lg p-3.5 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+        <div className="flex flex-col">
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-900">Master Plan Bulk Operations</h4>
+          <span className="text-[11px] text-slate-500">Mass alert missing carriers or reschedule all backlog items instantly.</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleAutoSchedulePending}
+            disabled={isAutoScheduling}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider px-3.5 py-2 rounded-lg shadow transition-colors flex items-center gap-1.5"
+          >
+            {isAutoScheduling ? <Loader2 className="w-4 h-4 animate-spin text-amber-300" /> : <Zap className="w-4 h-4 text-amber-300" />}
+            <span>{isAutoScheduling ? 'Scheduling...' : '⚡ Auto-Schedule Pending'}</span>
+          </button>
+          <button
+            onClick={handleBulkRescheduleBacklog}
+            className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs uppercase tracking-wider px-3.5 py-2 rounded-lg shadow transition-colors flex items-center gap-1.5"
+          >
+            <span>🔄 Reschedule Backlog to Today</span>
+          </button>
+          <button
+            onClick={handleBulkAlertCarriers}
+            className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider px-3.5 py-2 rounded-lg shadow transition-colors flex items-center gap-1.5"
+          >
+            <span>🚨 Bulk Alert Carriers</span>
+          </button>
+        </div>
+      </div>
+
       {/* Reconciliation Table */}
       <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="p-3 bg-slate-100 border-b border-slate-200 flex justify-between items-center shrink-0">
@@ -306,10 +441,12 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
                           </span>
                         )}
                         <button
-                          onClick={() => handleMoveToNextDay(item)}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm"
+                          onClick={() => handleScheduleBacklogItem(item)}
+                          disabled={schedulingId === item.id}
+                          className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-1 ml-auto inline-flex"
                         >
-                          Reschedule Backlog &rarr;
+                          {schedulingId === item.id ? <Loader2 className="w-3 h-3 animate-spin text-amber-300" /> : <Zap className="w-3 h-3 text-amber-300" />}
+                          <span>{schedulingId === item.id ? 'Scheduling...' : 'Schedule Backlog \u2192'}</span>
                         </button>
                       </td>
                     </tr>

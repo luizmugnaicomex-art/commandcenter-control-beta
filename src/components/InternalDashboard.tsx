@@ -33,9 +33,13 @@ interface InternalDashboardProps {
   onNextDay: () => void;
   onToday: () => void;
   onCloseDaySweep?: () => void;
+  onAutoSchedulePending?: () => Promise<void> | void;
+  onScheduleBacklog?: (item: MasterPlanItem) => Promise<void> | void;
+  onFactoryReset?: () => Promise<void> | void;
+  userRole?: string;
 }
 
-export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onArrivedAtLine, onNoShow, onCreateSpecialWindow, activeTab, selectedDate, onPrevDay, onNextDay, onToday, onCloseDaySweep }: InternalDashboardProps) {
+export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onArrivedAtLine, onNoShow, onCreateSpecialWindow, activeTab, selectedDate, onPrevDay, onNextDay, onToday, onCloseDaySweep, onAutoSchedulePending, onScheduleBacklog, onFactoryReset, userRole }: InternalDashboardProps) {
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
   const [isBlacklistModalOpen, setIsBlacklistModalOpen] = useState(false);
   
@@ -160,6 +164,31 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
     .filter(a => a.status === 'Operated')
     .sort((a, b) => (b.gateOutTime || '').localeCompare(a.gateOutTime || ''));
 
+  const handleCopyContainers = (status: string) => {
+    // Filter appointments that match the specific column status
+    const matchedContainers = appointments
+      .filter(apt => apt.status === status)
+      .map(apt => apt.containerId)
+      .filter(Boolean); // Remove any undefined/empty values
+
+    if (matchedContainers.length === 0) {
+      alert(`No containers to copy in ${status}`);
+      return;
+    }
+
+    const textToCopy = matchedContainers.join('\n');
+
+    // Use browser clipboard API
+    navigator.clipboard.writeText(textToCopy)
+      .then(() => {
+        alert(`✅ Copied ${matchedContainers.length} container(s) to clipboard!`);
+      })
+      .catch(err => {
+        console.error('Failed to copy: ', err);
+        alert('Failed to copy to clipboard. Please check browser permissions.');
+      });
+  };
+
   return (
     <main className="flex-1 w-full mx-auto p-4 md:p-6 flex flex-col gap-4 overflow-hidden bg-slate-50">
       {/* Top Header Action & KPI Strip */}
@@ -188,6 +217,17 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
         </section>
 
         <div className="flex items-center gap-3 shrink-0 self-stretch md:self-auto justify-end">
+          {/* Render only if Admin */}
+          {userRole === 'Admin' && onFactoryReset && (
+            <button 
+              onClick={onFactoryReset}
+              className="flex items-center gap-2 px-4 py-2 bg-red-700 hover:bg-red-800 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-colors shadow-sm"
+              title="Wipe All System Data"
+            >
+              ⚠️ HARD RESET
+            </button>
+          )}
+
           {onCloseDaySweep && (
             <button
               onClick={onCloseDaySweep}
@@ -249,6 +289,8 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
           onPrevDay={onPrevDay}
           onNextDay={onNextDay}
           onToday={onToday}
+          onAutoSchedulePending={onAutoSchedulePending}
+          onScheduleBacklog={onScheduleBacklog}
         />
       ) : activeTab === 'report' ? (
         <DailyReport appointments={appointments} />
@@ -346,9 +388,18 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-amber-500 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">Queue</h3>
-                <span className="bg-amber-600 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                  {queueAppointments.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-amber-600 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                    {queueAppointments.length}
+                  </span>
+                  <button
+                    onClick={() => handleCopyContainers('Awaiting Call')}
+                    title="Copy Container IDs"
+                    className="p-1 hover:bg-amber-600 rounded text-white transition-colors"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
                 {queueAppointments.map(apt => (
@@ -361,9 +412,18 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-emerald-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">In Transit</h3>
-                <span className="bg-emerald-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                  {transitAppointments.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-emerald-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                    {transitAppointments.length}
+                  </span>
+                  <button
+                    onClick={() => handleCopyContainers('Called/In Transit')}
+                    title="Copy Container IDs"
+                    className="p-1 hover:bg-emerald-700 rounded text-white transition-colors"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
                 {transitAppointments.map(apt => (
@@ -376,9 +436,18 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-orange-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">Physical Line</h3>
-                <span className="bg-orange-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                  {physicalLineAppointments.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-orange-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                    {physicalLineAppointments.length}
+                  </span>
+                  <button
+                    onClick={() => handleCopyContainers('Physical Line')}
+                    title="Copy Container IDs"
+                    className="p-1 hover:bg-orange-700 rounded text-white transition-colors"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
                 {physicalLineAppointments.map(apt => (
@@ -391,9 +460,18 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-blue-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">Active Yard</h3>
-                <span className="bg-blue-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                  {inYardAppointments.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-blue-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                    {inYardAppointments.length}
+                  </span>
+                  <button
+                    onClick={() => handleCopyContainers('In Yard')}
+                    title="Copy Container IDs"
+                    className="p-1 hover:bg-blue-700 rounded text-white transition-colors"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
                 {inYardAppointments.map(apt => (
@@ -414,9 +492,18 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             <div className="flex-1 flex flex-col bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm min-h-0">
               <div className="p-3 bg-purple-600 text-white font-bold flex justify-between items-center shrink-0 shadow-sm">
                 <h3 className="text-xs uppercase tracking-widest">Finished</h3>
-                <span className="bg-purple-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
-                  {finishedAppointments.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-purple-700 text-white px-2 py-0.5 rounded-full text-xs font-mono">
+                    {finishedAppointments.length}
+                  </span>
+                  <button
+                    onClick={() => handleCopyContainers('Operated')}
+                    title="Copy Container IDs"
+                    className="p-1 hover:bg-purple-700 rounded text-white transition-colors"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-slate-50">
                 {finishedAppointments.map(apt => (

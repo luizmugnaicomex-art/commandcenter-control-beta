@@ -9,11 +9,26 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function getCurrentSlot(): YardSlot {
-  return mockSlots.find(s => s.status === 'Active') || mockSlots[3]; // Uses slot id 4 (10:15 - 11:00)
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const activeSlot = mockSlots.find(s => {
+    const [startH, startM] = s.startTime.split(':').map(Number);
+    const [endH, endM] = s.endTime.split(':').map(Number);
+    const startMins = startH * 60 + startM;
+    const endMins = endH * 60 + endM;
+    
+    return currentMinutes >= startMins && currentMinutes < endMins;
+  });
+
+  // If outside operating hours, return the very first slot of the day, or the last active one
+  return activeSlot || mockSlots[0]; 
 }
 
 export function getNextOpenSlot(currentSlotId: string): YardSlot | undefined {
   const currentIndex = mockSlots.findIndex(s => s.id === currentSlotId);
+  // Ensure we don't go out of bounds if it's the last slot of the day
+  if (currentIndex === -1 || currentIndex >= mockSlots.length - 1) return undefined;
   return mockSlots[currentIndex + 1];
 }
 
@@ -76,10 +91,29 @@ export function sanitizeLicensePlate(plate: string): string {
 
 export function isDemurrageRisk(freeTimeExpiration?: string): boolean {
   if (!freeTimeExpiration) return false;
-  const expDate = new Date(freeTimeExpiration).getTime();
+  
+  let expDate: number;
+  
+  // Check if it's in DD/MM/YYYY format
+  if (freeTimeExpiration.includes('/')) {
+    const parts = freeTimeExpiration.split('/');
+    // Assuming DD/MM/YYYY
+    if (parts.length === 3) {
+      // Month is 0-indexed in JS Date
+      expDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
+    } else {
+      expDate = new Date(freeTimeExpiration).getTime();
+    }
+  } else {
+    expDate = new Date(freeTimeExpiration).getTime();
+  }
+
   if (isNaN(expDate)) return false;
+  
   const now = Date.now();
   const diffHours = (expDate - now) / (1000 * 60 * 60);
+  
+  // Flag as risk if expiring within 48 hours, or if it is already late (down to -24h)
   return diffHours <= 48 && diffHours >= -24;
 }
 
