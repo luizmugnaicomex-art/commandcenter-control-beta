@@ -208,7 +208,10 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
     }
   };
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     setIsLoading(true);
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -217,22 +220,53 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data: any[] = XLSX.utils.sheet_to_json(ws);
-        processWorkbookData(data);
-      } catch (err) {
-        console.error('Error parsing excel:', err);
-        showToast('Failed to parse Excel file. Please ensure it matches the DELIVERY PLAN format.');
+        const data = XLSX.utils.sheet_to_json<any>(ws);
+
+        if (data.length === 0) {
+          alert("The uploaded Excel sheet is empty.");
+          return;
+        }
+
+        // Map Excel rows to the MasterPlanItem interface
+        const parsedItems: MasterPlanItem[] = data.map((row, index) => {
+          // Handle various potential column names (Portuguese or English) from the BYD spreadsheet
+          const container = row['CONTAINER'] || row['Container'] || row['Nº Container'] || `UNKNOWN-${index}`;
+          const bl = row['BL'] || row['MBL'] || row['HBL'] || 'N/A';
+          const carrier = row['TRANSPORTADORA'] || row['Transportadora'] || row['Carrier'] || 'BYD Operations';
+          const site = row['DESTINO'] || row['Destino'] || row['Warehouse'] || 'Warehouse A';
+          const demurrage = row['FREE TIME'] || row['Free Time'] || row['Demurrage'] || '';
+          const model = row['MODELO'] || row['Modelo'] || row['Model'] || '';
+          
+          return {
+            id: `mp_${Date.now()}_${index}`,
+            containerId: String(container).replace(/[^a-zA-Z0-9]/g, '').toUpperCase(),
+            blNumber: String(bl).toUpperCase(),
+            targetDate: selectedDate, // Bind to the currently selected date in the UI
+            carrierName: String(carrier).toUpperCase(),
+            deliverySite: String(site).toUpperCase(),
+            demurrageDate: String(demurrage),
+            model: String(model),
+            status: 'MISSING BOOKING',
+            excelStatus: 'PENDING'
+          };
+        });
+
+        // Pass the parsed array up to App.tsx
+        onUploadMasterPlan(parsedItems);
+        alert(`✅ Successfully parsed ${parsedItems.length} containers from Excel!`);
+        
+      } catch (error) {
+        console.error("Error parsing Excel file:", error);
+        alert("Failed to read the Excel file. Please ensure it is a valid .xlsx or .xls file.");
       } finally {
         setIsLoading(false);
       }
     };
+    
     reader.readAsBinaryString(file);
-  };
-
-  const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
-    }
+    
+    // Reset the input so the same file can be uploaded again if needed
+    e.target.value = '';
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -324,7 +358,7 @@ export const MasterPlanReconciliation: React.FC<MasterPlanReconciliationProps> =
           <label className="cursor-pointer bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2 shrink-0">
             {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             <span>Upload File</span>
-            <input type="file" accept=".xlsx, .xls, .csv" onChange={onFileChange} className="hidden" disabled={isLoading} />
+            <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" disabled={isLoading} />
           </label>
         </div>
 

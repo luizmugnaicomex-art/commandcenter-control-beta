@@ -9,7 +9,7 @@ import { MasterPlanReconciliation } from './MasterPlanReconciliation';
 import { LoadingPanel } from './LoadingPanel';
 import { cn, sanitizeLicensePlate, getPunctualityStatus } from '../utils';
 import { mockBlacklistedDrivers } from '../mockData';
-import { ShieldAlert, Zap, Truck, ClipboardList, BarChart3, LayoutDashboard } from 'lucide-react';
+import { ShieldAlert, Zap, ClipboardList, Download } from 'lucide-react';
 
 interface InternalDashboardProps {
   appointments: TruckAppointment[];
@@ -37,6 +37,7 @@ interface InternalDashboardProps {
   onScheduleBacklog?: (item: MasterPlanItem) => Promise<void> | void;
   onFactoryReset?: () => Promise<void> | void;
   userRole?: string;
+  lang?: string;
 }
 
 export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan, onUpdateMasterPlanItem, currentSlot, nextSlot, onCallNext, onAssignLocation, onGateOut, onRevertToYard, onCallTruck, onGateIn, onArrivedAtLine, onNoShow, onCreateSpecialWindow, activeTab, selectedDate, onPrevDay, onNextDay, onToday, onCloseDaySweep, onAutoSchedulePending, onScheduleBacklog, onFactoryReset, userRole }: InternalDashboardProps) {
@@ -75,8 +76,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
   const currentSlotAppointments = appointments.filter(a => a.slotId === currentSlot.id);
   const inYardCount = appointments.filter(a => a.status === 'In Yard').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
   const operatedCount = currentSlotAppointments.filter(a => a.status === 'Operated').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
-  const awaitingCount = currentSlotAppointments.filter(a => a.status === 'Awaiting Call' || a.status === 'Called/In Transit' || a.status === 'Physical Line').reduce((acc, a) => acc + (a.isBitrem ? 2 : 1), 0);
-
+  
   const [isTimeToCall, setIsTimeToCall] = useState(false);
   
   useEffect(() => {
@@ -165,11 +165,10 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
     .sort((a, b) => (b.gateOutTime || '').localeCompare(a.gateOutTime || ''));
 
   const handleCopyContainers = (status: string) => {
-    // Filter appointments that match the specific column status
     const matchedContainers = appointments
       .filter(apt => apt.status === status)
       .map(apt => apt.containerId)
-      .filter(Boolean); // Remove any undefined/empty values
+      .filter(Boolean);
 
     if (matchedContainers.length === 0) {
       alert(`No containers to copy in ${status}`);
@@ -177,16 +176,53 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
     }
 
     const textToCopy = matchedContainers.join('\n');
-
-    // Use browser clipboard API
     navigator.clipboard.writeText(textToCopy)
-      .then(() => {
-        alert(`✅ Copied ${matchedContainers.length} container(s) to clipboard!`);
-      })
+      .then(() => alert(`✅ Copied ${matchedContainers.length} container(s) to clipboard!`))
       .catch(err => {
         console.error('Failed to copy: ', err);
         alert('Failed to copy to clipboard. Please check browser permissions.');
       });
+  };
+
+  // 🔥 NEW: Ground Truth Export (Phase 34) 🔥
+  const handleExportGroundTruth = () => {
+    const headers = ['Container ID', 'BL Number', 'Transport Carrier', 'Model/Item', 'Delivery Site', 'Scheduled Window', 'Gate-In Time', 'Gate-Out Time', 'Turnaround (Mins)', 'Status'];
+    
+    const rows = appointments.map(apt => {
+      let turnaround = 'N/A';
+      if (apt.status === 'Operated' && apt.gateInTime && apt.gateOutTime) {
+        const [inH, inM] = apt.gateInTime.split(':').map(Number);
+        const [outH, outM] = apt.gateOutTime.split(':').map(Number);
+        let diff = (outH * 60 + outM) - (inH * 60 + inM);
+        if (diff < 0) diff += 24 * 60;
+        turnaround = diff.toString();
+      }
+
+      const mpItem = masterPlan.find(m => m.containerId === apt.containerId);
+      const model = mpItem?.model || 'N/A';
+
+      return [
+        apt.containerId,
+        apt.blNumber,
+        `"${apt.carrier}"`, // Quotes to handle commas in names
+        `"${model}"`,
+        apt.unloadingLocation || 'N/A',
+        apt.scheduledTime,
+        apt.gateInTime || 'N/A',
+        apt.gateOutTime || 'N/A',
+        turnaround,
+        apt.status
+      ].join(',');
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `BYD_Ground_Truth_${selectedDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -196,7 +232,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
         <section className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full md:w-auto flex-1">
           <KPICard 
             title="Total Scheduled" 
-            value={appointments.length + 175} 
+            value={appointments.length} 
             subtitle="Bookings for Date"
             icon="truck"
             trend="+12% vs yesterday"
@@ -216,11 +252,29 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
           />
         </section>
 
-        <div className="flex items-center gap-3 shrink-0 self-stretch md:self-auto justify-end">
-          {/* Render only if Admin */}
-          {userRole === 'Admin' && onFactoryReset && (
+        <div className="flex items-center gap-3 shrink-0 self-stretch md:self-auto justify-end flex-wrap">
+          
+          {/* 🔥 NEW: Export Ground Truth Button 🔥 */}
+          <button
+            onClick={handleExportGroundTruth}
+            className="flex items-center gap-2 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-colors shadow-sm"
+            title="Export exact operational times to audit WMS"
+          >
+            <Download className="w-4 h-4" />
+            Ground Truth CSV
+          </button>
+
+          {/* Render only if Admin (Bulletproofed click handler) */}
+          {userRole === 'Admin' && (
             <button 
-              onClick={onFactoryReset}
+              onClick={(e) => {
+                e.preventDefault();
+                if (typeof onFactoryReset === 'function') {
+                  onFactoryReset();
+                } else {
+                  alert("Error: onFactoryReset is not connected properly to App.tsx!");
+                }
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-red-700 hover:bg-red-800 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-colors shadow-sm"
               title="Wipe All System Data"
             >
@@ -309,7 +363,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
       ) : (
         /* Kanban Board (Gestão de Pátio) with 5 Columns & Date Navigation Bar */
         <div className="flex-1 flex flex-col gap-3 min-h-0">
-          {/* Phase 29 Task 3: Fast-Track Gate Pass Scanner Bar */}
+          {/* Fast-Track Gate Pass Scanner Bar */}
           <div className="bg-gradient-to-r from-blue-900 to-slate-900 rounded-lg p-3 shadow-md flex items-center justify-between gap-4 shrink-0">
             <div className="flex items-center gap-2 text-white">
               <span className="text-lg">🔍</span>
@@ -351,7 +405,7 @@ export function InternalDashboard({ appointments, masterPlan, onUploadMasterPlan
             </form>
           </div>
 
-          {/* Task 1: Date Navigation Bar */}
+          {/* Date Navigation Bar */}
           <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-2.5 shadow-sm shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-xs font-black uppercase tracking-wider text-slate-800">Operational Date:</span>

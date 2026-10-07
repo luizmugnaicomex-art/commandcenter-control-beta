@@ -13,7 +13,7 @@ import { MobileClerkApp } from './components/MobileClerkApp';
 import { Login, UserRole, UserDetails } from './components/Login';
 import { Language, t } from './i18n';
 import { cn } from './utils';
-import { collection, query, onSnapshot, doc, setDoc, updateDoc, writeBatch, where, getDocs } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc, writeBatch, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { LayoutDashboard, Kanban, Zap, Calendar, FileText, Bell, LogOut, Truck } from 'lucide-react';
 
@@ -332,54 +332,43 @@ export default function App() {
     }
   };
 
+  // 🔥 UPDATED HARD RESET LOGIC 🔥
   const handleFactoryReset = async () => {
-    // 1. Double Confirmation
-    const isSure = window.confirm("⚠️ DANGER: Are you absolutely sure you want to WIPE ALL system data? This will delete all appointments and master plan records from Firestore. This CANNOT be undone.");
+    const isSure = window.confirm("⚠️ DANGER: WIPE ALL DATA?");
     if (!isSure) return;
-    
-    const isDoubleSure = window.confirm("Please confirm one more time to execute the HARD RESET.");
+    const isDoubleSure = window.confirm("Are you 100% sure? This deletes everything in Firestore.");
     if (!isDoubleSure) return;
 
+    console.log("Starting Hard Reset - Fetching live data...");
+    
     try {
-      let deletedCount = 0;
-      let batch = writeBatch(db);
-      let opCount = 0;
+      // 1. Fetch EVERYTHING directly from the DB 
+      const appointmentsSnapshot = await getDocs(collection(db, 'appointments'));
+      const masterPlanSnapshot = await getDocs(collection(db, 'masterPlan'));
 
-      // 2. Fetch and delete all appointments from Firestore
-      const aptSnapshot = await getDocs(collection(db, 'appointments'));
-      for (const d of aptSnapshot.docs) {
-        batch.delete(d.ref);
-        opCount++;
-        deletedCount++;
-        if (opCount >= 400) {
-          await batch.commit();
-          batch = writeBatch(db);
-          opCount = 0;
-        }
-      }
+      console.log(`Found ${appointmentsSnapshot.docs.length} appointments and ${masterPlanSnapshot.docs.length} master plan items to delete.`);
 
-      // 3. Fetch and delete all masterPlan items from Firestore
-      const planSnapshot = await getDocs(collection(db, 'masterPlan'));
-      for (const d of planSnapshot.docs) {
-        batch.delete(d.ref);
-        opCount++;
-        deletedCount++;
-        if (opCount >= 400) {
-          await batch.commit();
-          batch = writeBatch(db);
-          opCount = 0;
-        }
-      }
+      // 2. Map direct deletions
+      const aptPromises = appointmentsSnapshot.docs.map(document => 
+        deleteDoc(doc(db, 'appointments', document.id))
+      );
+      const mpPromises = masterPlanSnapshot.docs.map(document => 
+        deleteDoc(doc(db, 'masterPlan', document.id))
+      );
 
-      if (opCount > 0) {
-        await batch.commit();
-      }
+      // 3. Execute all deletions
+      await Promise.all([...aptPromises, ...mpPromises]);
+      
+      // 4. Force state clear
+      setAppointments([]);
+      setMasterPlan([]);
 
-      alert(`✅ System Reset Successful. Deleted ${deletedCount} records from Firestore.`);
-      window.location.reload();
+      console.log("Hard Reset Complete.");
+      alert("✅ System Reset Successful. All data wiped.");
+      
     } catch (error) {
       console.error("Reset failed: ", error);
-      alert("Error wiping data: " + (error instanceof Error ? error.message : String(error)));
+      alert("Error wiping data. Check browser console for permission issues.");
     }
   };
 
